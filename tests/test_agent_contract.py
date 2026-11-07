@@ -398,6 +398,7 @@ def test_describe_enumerates_all_subcommands(capsys):
     assert set(schema["commands"]) == {
         "index", "readiness", "query", "research", "status", "sync-zotero-notes", "describe",
         "browse", "plan-layout", "cache", "inspect", "source", "passage", "find",
+        "doctor", "diagnose",
     }
     assert schema["commands"]["query"]["output_fields"] == DOCUMENTED_FIELDS
     assert schema["commands"]["browse"]["inventory_json_version"] == 1

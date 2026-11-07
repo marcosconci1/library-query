@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import time
 
-from . import browse, cache, config, errors, exact, expansion, extract, inspection, layout_plan, ledger, readiness, research, revisions, store, structure, targets, zotero
+from . import browse, cache, config, doctor, errors, exact, expansion, extract, inspection, journal, layout_plan, ledger, readiness, research, revisions, store, structure, targets, zotero
 
 #: The query result fields guaranteed by the agent-tool-contract capability. Every
 #: result object carries all of these, using `null` where a value did not resolve.
@@ -300,7 +300,23 @@ def cmd_readiness(args: argparse.Namespace) -> int:
     return 0
 
 
+def _index_counts(summary: dict) -> dict:
+    return {key: summary[key] for key in ("indexed", "new", "changed", "moved", "deleted", "unchanged")}
+
+
 def cmd_index(args: argparse.Namespace) -> int:
+    """Run indexing and journal its outcome (error class name only, never a message)."""
+    counts: dict = {}
+    try:
+        code = _run_index(args, counts)
+    except BaseException as exc:  # noqa: BLE001 — recorded, then re-raised untouched
+        journal.append_event("index_finished", outcome="error", error=type(exc).__name__)
+        raise
+    journal.append_event("index_finished", outcome="ok" if code == 0 else "not_ready", exit_code=code, **counts)
+    return code
+
+
+def _run_index(args: argparse.Namespace, counts: dict) -> int:
     extract.validate_supported_extensions()
     require_library_root()
     # Revision publication is part of indexing for every writer, cache-enabled
@@ -310,6 +326,10 @@ def cmd_index(args: argparse.Namespace) -> int:
     ctx = revisions.managed_context()
     with revisions.writer_session(ctx) as session:
         plan = ledger.reconcile()
+        journal.append_event(
+            "index_started",
+            files_seen=sum(len(plan[key]) for key in ("new", "changed", "moved", "unchanged")),
+        )
 
         has_actions = bool(
             plan["new"]
@@ -373,6 +393,7 @@ def cmd_index(args: argparse.Namespace) -> int:
             if published is not None:
                 summary["index_revision"] = published["revision"]
                 summary["index_incarnation"] = published["incarnation"]
+            counts.update(_index_counts(summary))
             print(json.dumps(summary))
             return 0 if research_info["ready"] else errors.EXIT_CONFIG_ERROR
 
@@ -510,6 +531,7 @@ def cmd_index(args: argparse.Namespace) -> int:
         if published is not None:
             summary["index_revision"] = published["revision"]
             summary["index_incarnation"] = published["incarnation"]
+        counts.update(_index_counts(summary))
         print(json.dumps(summary))
         return 0 if research_info["ready"] else errors.EXIT_CONFIG_ERROR
 
@@ -524,6 +546,25 @@ def _complete_result(place: dict) -> dict:
 
 
 def cmd_query(args: argparse.Namespace) -> int:
+    """Run a query and journal its outcome; never the question text or the error message."""
+    started = time.monotonic()
+    result: dict = {}
+    try:
+        code = _run_query(args, result)
+    except BaseException as exc:  # noqa: BLE001 — recorded, then re-raised untouched
+        journal.append_event(
+            "query_finished", outcome="error", error=type(exc).__name__,
+            duration=journal.duration_bucket(time.monotonic() - started),
+        )
+        raise
+    journal.append_event(
+        "query_finished", outcome="ok" if code == 0 else "error",
+        duration=journal.duration_bucket(time.monotonic() - started), **result,
+    )
+    return code
+
+
+def _run_query(args: argparse.Namespace, result: dict) -> int:
     expand = not args.no_expand
     target = query_target(args)
     extra = {"target": target} if target is not None else {}
@@ -564,6 +605,8 @@ def cmd_query(args: argparse.Namespace) -> int:
                 )
             ]
         cache_diagnostics = session.diagnostics()
+    result["results"] = len(places)
+    result["top_score_band"] = journal.score_band(places[0].get("score") if places else None)
     if args.json:
         # `expansion` is a sibling of `places`, never a field inside a result: the
         # The result-field contract predates this change and consumers reading
@@ -743,6 +786,22 @@ def query_target(args):
     resolved = targets.resolve(targets.parse(value))
     targets.verify_index(resolved)
     return resolved
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    results = doctor.run_checks()
+    code = doctor.exit_code(results)
+    if args.json:
+        print(json.dumps(doctor.to_json(results), ensure_ascii=False))
+    else:
+        for name, ok, detail in results:
+            print(f"[{'ok' if ok else 'fail'}] {name}: {detail}")
+    return code
+
+
+def cmd_diagnose(_: argparse.Namespace) -> int:
+    print(doctor.build_bundle(doctor.run_checks()), end="")
+    return 0
 
 
 def cmd_inspect(args):
@@ -990,6 +1049,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_find.add_argument("--limit", type=int, default=exact.MAX_HITS, help="maximum places returned")
     p_find.add_argument("--json", action="store_true", help="machine-readable output")
     p_find.set_defaults(func=cmd_find)
+
+    doctor_help = "check environment, library folder, Qdrant, and ledger (exit 1 on any failure)"
+    p_doctor = sub.add_parser("doctor", help=doctor_help, description=doctor_help)
+    p_doctor.add_argument("--json", action="store_true", help="machine-readable output")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    diagnose_help = "print a redacted diagnostic report for bug reports (no queries, paths, or keys)"
+    p_diagnose = sub.add_parser("diagnose", help=diagnose_help, description=diagnose_help)
+    p_diagnose.set_defaults(func=cmd_diagnose)
 
     p_inspect = sub.add_parser("inspect", help="offline details for an exact bibliographic item")
     p_inspect.add_argument("--item", required=True)

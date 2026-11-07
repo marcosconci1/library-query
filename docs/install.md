@@ -83,6 +83,8 @@ re-indexing after adding a few PDFs takes seconds, not minutes.
 | `cache status` / `cache clear` | Inspect or reset the local retrieval cache |
 | `readiness` | Audit index metadata for the research API (`--repair` to fix) |
 | `sync-zotero-notes` | Materialize Zotero annotation markdown (opt-in write) |
+| `doctor` | Check environment, folder, Qdrant, ledger (exit code 1 on failure) |
+| `diagnose` | Print a redacted diagnostic report for bug reports |
 
 ## Reading results
 
