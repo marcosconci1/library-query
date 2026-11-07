@@ -1,0 +1,11 @@
+# Local state and secrets
+.env
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Tool caches
+retrieval-cache.sqlite3

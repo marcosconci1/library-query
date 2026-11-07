@@ -1,0 +1,18 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: library-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - library-qdrant-data:/qdrant/storage
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  library-qdrant-data:
