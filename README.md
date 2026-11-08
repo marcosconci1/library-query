@@ -1,8 +1,16 @@
-# library-query
+<p align="center">
+  <img src="docs/banner.png" alt="library-query" width="360"/>
+</p>
 
-> A semantic locator for your document library. Ask a question in natural
-> language and get back where the answer lives: the document, the page, and
-> the matching passage. It finds places; it never writes answers.
+<p align="center">
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+"/>
+</p>
+
+<p align="center">
+  <b>A semantic locator for your document library.</b> Ask a question in natural language and get back where the answer lives: the document, the page, and the matching passage. It finds places; it never writes answers.
+</p>
+
 
 Reading is not the bottleneck. Finding is. The books, papers, and article
 transcripts pile up as PDF and EPUB files on a disk somewhere, and every

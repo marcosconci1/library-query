@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1200px; height:630px; background:#ffffff; }
+  .card {
+    position:absolute; inset:0;
+    background:
+      radial-gradient(820px 480px at 30% 125%, rgba(223,231,240,.9) 0%, rgba(0,0,0,0) 62%),
+      radial-gradient(560px 380px at 82% -18%, rgba(239,233,223,.9) 0%, rgba(0,0,0,0) 55%),
+      #fbfaf7;
+  }
+  .grain {
+    position:absolute; inset:0; opacity:.05; pointer-events:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='1'/></svg>");
+    background-size:160px 160px;
+  }
+  .lockup { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:44px; }
+  .mark { width:250px; height:250px; }
+  .name { font-family:'Inter',sans-serif; font-size:104px; font-weight:700; color:#211d16; letter-spacing:-3.5px; white-space:nowrap; }
+  .tagline { position:absolute; bottom:118px; left:0; right:0; text-align:center; font-family:'JetBrains Mono',monospace; font-size:30px; letter-spacing:2px; color:#8d8779; }
+  .bracket { position:absolute; color:#211d16; opacity:.9; }
+  .bracket svg { display:block; }
+  .tl{ top:64px; left:74px; } .tr{ top:64px; right:74px; }
+  .bl{ bottom:64px; left:74px; } .br{ bottom:64px; right:74px; }
+</style></head>
+<body>
+  <div class="card"></div><div class="grain"></div>
+  <span class="bracket tl"><svg width="46" height="46" viewBox="0 0 46 46"><path d="M2 44 V6 Q2 2 6 2 H44" fill="none" stroke="#211d16" stroke-width="2.5"/></svg></span>
+  <span class="bracket tr"><svg width="46" height="46" viewBox="0 0 46 46"><path d="M2 2 H40 Q44 2 44 6 V44" fill="none" stroke="#211d16" stroke-width="2.5"/></svg></span>
+  <span class="bracket bl"><svg width="46" height="46" viewBox="0 0 46 46"><path d="M44 2 V40 Q44 44 40 44 H2" fill="none" stroke="#211d16" stroke-width="2.5"/></svg></span>
+  <span class="bracket br"><svg width="46" height="46" viewBox="0 0 46 46"><path d="M44 44 H6 Q2 44 2 40 V2" fill="none" stroke="#211d16" stroke-width="2.5"/></svg></span>
+  <div class="lockup">
+    <svg class="mark" viewBox="0 0 112 112" fill="none">
+      <path d="M56 24 C 44 16, 24 16, 14 22 L14 84 C 24 78, 44 78, 56 86 Z" stroke="#211d16" stroke-width="5" stroke-linejoin="round" fill="#fbfaf7"/>
+      <path d="M56 24 C 68 16, 88 16, 98 22 L98 84 C 88 78, 68 78, 56 86 Z" stroke="#211d16" stroke-width="5" stroke-linejoin="round" fill="#fbfaf7"/>
+      <path d="M24 36 C 33 33, 42 33, 47 36 M24 48 C 33 45, 42 45, 47 48" stroke="#211d16" stroke-width="4" stroke-linecap="round" opacity=".35"/>
+      <path d="M24 60 C 33 57, 42 57, 47 60" stroke="#1e4fa3" stroke-width="6" stroke-linecap="round"/>
+      <path d="M65 36 C 74 33, 83 33, 88 36 M65 48 C 74 45, 83 45, 88 48 M65 60 C 74 57, 83 57, 88 60" stroke="#211d16" stroke-width="4" stroke-linecap="round" opacity=".35"/>
+      <path d="M84 18 V40 L90 33 L96 40 V18" fill="#1e4fa3"/>
+    </svg>
+    <div class="name">library-query</div>
+  </div>
+  <div class="tagline">finds where the answer lives</div>
+</body></html>
