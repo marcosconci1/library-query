@@ -301,6 +301,7 @@ def test_rejects_location_inside_git_worktree(cache_env, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     cache_dir = repo / "cache"
     cache_dir.mkdir()
     with pytest.raises(errors.CacheUnsafeError):
@@ -312,6 +313,7 @@ def test_home_dotfiles_git_root_does_not_refuse(cache_env, monkeypatch):
     fake_home = Path(tempfile.mkdtemp(prefix="lq-home-", dir="/tmp"))
     try:
         (fake_home / ".git").mkdir()
+        (fake_home / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
         cache_dir = fake_home / ".local" / "share" / "library-query" / "cache"
         cache_dir.mkdir(parents=True)
         cache_dir.chmod(0o700)
@@ -323,11 +325,34 @@ def test_home_dotfiles_git_root_does_not_refuse(cache_env, monkeypatch):
         shutil.rmtree(fake_home, ignore_errors=True)
 
 
+def test_empty_git_dir_is_not_a_worktree(cache_env, monkeypatch):
+    fake_home = Path(tempfile.mkdtemp(prefix="lq-home-", dir="/tmp"))
+    try:
+        tools_dir = fake_home / "tools"
+        (tools_dir / ".git").mkdir(parents=True)
+        cache_dir = tools_dir / "cache"
+        cache_dir.mkdir()
+        cache_dir.chmod(0o700)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        cache._Storage(make_settings(cache_dir)).check_safe()
+
+        shutil.rmtree(tools_dir / ".git")
+        (tools_dir / ".git").write_text("gitdir: ../.git/worktrees/cache\n")
+        pointer_cache_dir = tools_dir / "pointer-cache"
+        pointer_cache_dir.mkdir()
+        pointer_cache_dir.chmod(0o700)
+        with pytest.raises(errors.CacheUnsafeError):
+            cache._Storage(make_settings(pointer_cache_dir)).check_safe()
+    finally:
+        shutil.rmtree(fake_home, ignore_errors=True)
+
+
 def test_project_git_below_home_still_refused(cache_env, monkeypatch):
     fake_home = Path(tempfile.mkdtemp(prefix="lq-home-", dir="/tmp"))
     try:
         repo = fake_home / "some-project"
         (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
         cache_dir = repo / "cache"
         cache_dir.mkdir()
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))

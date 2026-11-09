@@ -436,7 +436,12 @@ def _path_safety(db_path: Path) -> str | None:
         for _ in range(64):
             # A .git entry at the home root is a personal dotfiles repo, not a
             # project worktree; caches legitimately live under home (XDG dirs).
-            if (probe / ".git").exists() and probe != home:
+            git_entry = probe / ".git"
+            # Empty .git directories can be stray filesystem entries, not repos.
+            is_repo = git_entry.is_file() or (
+                git_entry.is_dir() and (git_entry / "HEAD").exists()
+            )
+            if is_repo and probe != home:
                 return "inside_git_worktree"
             if probe.parent == probe:
                 break
