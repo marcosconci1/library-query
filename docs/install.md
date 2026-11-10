@@ -93,6 +93,43 @@ section anchor, and the matching chunk text. Results are ranked by
 semantic distance, closest first. The tool returns places, not answers:
 read the cited page to form your own conclusion.
 
+Human `query` and `find` output label PDF hits `PDF p.<n>`. The number is
+the legacy `page` value, a 1-based PDF page index. It can differ from the
+number printed on the page, and it can be one page later than where the
+passage starts (see the citation rule below).
+
+`research`, `source` and `passage` print JSON. For PDF passages:
+
+- `location.page_start`, `location.page_end`, `location.printed_start`,
+  `location.printed_end` sit inside the `location` object of `research`
+  results, `source` chunks and `passage` chunks. The printed values are
+  `null` when the PDF has no real page-label scheme.
+- `section` is a sibling of `location`: `{path, start_page, start_printed}`,
+  the outline path of the section that contains `page_start`. It is `null`
+  when the PDF has no outline. It is absent on points indexed before
+  0.2.0.
+
+To cite a PDF passage, take the PDF page from `location.page_start` and the
+printed page from `location.printed_start`. They describe the same page.
+Write `printed p. X (PDF p. Y)`, with X from `printed_start` and Y from
+`page_start`. When `page_end` differs from `page_start`, give the range, for
+example `printed pp. 277–278 (PDF pp. 299–300)`, with the printed range from
+`printed_start` and `printed_end`. When `printed_start` is `null`, cite
+`PDF p. Y` alone.
+
+`page` and `location.value` keep their 0.1.0 meaning. When a chunk begins
+with text carried over from the previous page, they can be one page later
+than `location.page_start`, so do not cite the page from them.
+
+### Upgrading from 0.1.0
+
+0.2.0 changes the extractor version, which is part of the index
+fingerprint. The next `library-query index` sees the mismatch, re-extracts
+and re-embeds every document in the ledger, and publishes a new index
+revision. Cached retrieval candidates are tied to the index revision, so
+queries after reindexing use candidates for the new revision. Until then,
+points indexed by 0.1.0 keep working and return results without the new fields.
+
 Repeated queries with the same phrasing are served from a local retrieval
 cache (`retrieval-cache.sqlite3` in your cache directory). The cache is
 disposable: delete it at any time and the next query rebuilds it.

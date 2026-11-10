@@ -845,7 +845,7 @@ def _passage_bundle(record: dict, request: ResearchRequest) -> dict:
         {"query_index": index, "score": record["by_question"][index]}
         for index in sorted(record["by_question"])
     ]
-    return {
+    bundle = {
         "evidence_id": evidence_id,
         "chunk_index": chunk_index,
         "passage_hash": passage_hash,
@@ -857,6 +857,9 @@ def _passage_bundle(record: dict, request: ResearchRequest) -> dict:
         "query_indexes": sorted(record["by_question"]),
         "query_scores": query_scores,
     }
+    if store.has_pdf_location(payload):
+        bundle["section"] = section_hint(payload)
+    return bundle
 
 
 def _location_hint(payload: dict) -> dict:
@@ -873,8 +876,21 @@ def _location_hint(payload: dict) -> dict:
     if name.endswith(".epub"):
         return {"kind": "section", "value": page}
     if name.endswith(".pdf"):
-        return {"kind": "page", "value": page}
+        # `value` stays the 1-based PDF page index. The range and printed labels are
+        # additive: absent entirely on points indexed before they existed.
+        hint = {"kind": "page", "value": page}
+        if store.has_pdf_location(payload):
+            hint.update({field: payload.get(field) for field in ("page_start", "page_end", "printed_start", "printed_end")})
+        return hint
     return {"kind": "unknown", "value": None}
+
+
+def section_hint(payload: dict) -> dict | None:
+    """Outline section of a PDF passage, or None without an outline."""
+    path = payload.get("section_path")
+    if not path:
+        return None
+    return {"path": list(path), "start_page": payload.get("section_start_page"), "start_printed": payload.get("section_start_printed")}
 
 
 def _source_bundle(source_id: str, rrf_score: float, ordered_passages: list, request: ResearchRequest) -> dict:
@@ -999,8 +1015,21 @@ def response_schema() -> dict:
                             "type": "object",
                             "fields": {
                                 "kind": {"type": "string", "choices": ["page", "section", "unknown"]},
-                                "value": {"type": ["integer", "null"]},
+                                "value": {"type": ["integer", "null"], "semantics": "1-based PDF page index, not the printed page number"},
+                                "page_start": {"type": ["integer", "null"], "semantics": "PDF-only, additive, absent on older points"},
+                                "page_end": {"type": ["integer", "null"], "semantics": "PDF-only, additive, absent on older points"},
+                                "printed_start": {"type": ["string", "null"], "semantics": "PDF-only; null without a real label scheme"},
+                                "printed_end": {"type": ["string", "null"], "semantics": "PDF-only; null without a real label scheme"},
                             },
+                        },
+                        "section": {
+                            "type": ["object", "null"],
+                            "fields": {
+                                "path": {"type": "array", "item": {"type": "string"}},
+                                "start_page": {"type": "integer"},
+                                "start_printed": {"type": ["string", "null"]},
+                            },
+                            "semantics": "PDF-only, present only on points indexed with location fields: outline section containing page_start; null without an outline",
                         },
                         "score": {"type": "number", "semantics": "best raw semantic score across associated questions"},
                         "query_indexes": {"type": "array", "item": {"type": "integer"}, "semantics": "sorted, de-duplicated zero-based indexes of supplied questions"},

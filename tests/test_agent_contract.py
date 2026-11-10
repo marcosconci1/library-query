@@ -357,7 +357,7 @@ def test_human_query_output_formatting_for_formats(isolated_env, monkeypatch, ca
     assert run_cli(["query", "question"]) == 0
     out = capsys.readouterr().out
     assert "EPUB Book (Author A | 2024) section 7" in out
-    assert "PDF Paper (Author B | 2023) p.3" in out
+    assert "PDF Paper (Author B | 2023) PDF p.3" in out
     assert "Text Notes" in out
     assert "Text Notes p." not in out
     assert "Text Notes section" not in out

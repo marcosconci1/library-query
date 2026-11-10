@@ -916,3 +916,19 @@ def test_untrusted_oversized_numbers_are_invalid_vectors(cache_env):
     vector = [0.0] * config.EMBEDDING_DIM
     vector[0] = 10 ** 1000
     assert cache._validated_vector({"v": 1, "vector": vector}) is None
+
+
+def test_git_entry_above_home_is_not_a_worktree(cache_env, monkeypatch):
+    """Only directories below home can be a project; a stray .git above it never counts."""
+    outer = Path(tempfile.mkdtemp(prefix="lq-outer-", dir="/tmp"))
+    try:
+        (outer / ".git").mkdir()
+        (outer / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        fake_home = outer / "home"
+        cache_dir = fake_home / ".local" / "share" / "library-query" / "cache"
+        cache_dir.mkdir(parents=True)
+        cache_dir.chmod(0o700)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        cache._Storage(make_settings(cache_dir)).check_safe()
+    finally:
+        shutil.rmtree(outer, ignore_errors=True)

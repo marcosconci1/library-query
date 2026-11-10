@@ -44,9 +44,12 @@ def read_chunks(document_id, indexes):
 def descriptor(payload, max_chars):
     text = payload["text"]
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return {"evidence_id": f"{payload['document_id']}:{payload['chunk_index']}:{digest}",
+    item = {"evidence_id": f"{payload['document_id']}:{payload['chunk_index']}:{digest}",
             "chunk_index": payload["chunk_index"], "location": research._location_hint(payload),
             "text": text[:max_chars], "text_truncated": len(text) > max_chars}
+    if store.has_pdf_location(payload):
+        item["section"] = research.section_hint(payload)
+    return item
 
 
 def source(document_id=None, path=None, offset=0, limit=SOURCE_LIMIT):
@@ -111,4 +114,4 @@ def schema():
             "passage": {"default_before_after": CONTEXT_COUNT, "max_before_after": CONTEXT_MAX_COUNT,
             "default_max_chars": CONTEXT_CHARS, "max_chars": CONTEXT_MAX_CHARS,
             "fields": ["schema_version", "evidence_id", "document_id", "center_chunk_index", "passages", "omitted_chunk_indexes", "absent_chunk_indexes"]},
-            "chunk_fields": ["evidence_id", "chunk_index", "location", "text", "text_truncated"]}
+            "chunk_fields": ["evidence_id", "chunk_index", "location", "section", "text", "text_truncated"]}

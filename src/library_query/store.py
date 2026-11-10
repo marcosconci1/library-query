@@ -230,6 +230,10 @@ def upsert_chunks(
             "page": chunk.get("page"),
             "text": chunk.get("text"),
         }
+        # PDF chunks only: page range, printed labels and outline section. The page
+        # index stays the address; these are presentation fields.
+        if "page_start" in chunk:
+            payload.update({field: chunk.get(field) for field in PDF_LOCATION_FIELDS})
         points.append(PointStruct(id=pid, vector=vector, payload=payload))
 
     # Qdrant rejects request bodies over 32 MiB; a whole document's points can
@@ -589,11 +593,26 @@ def _hit_score(hit) -> float:
     return score if isinstance(score, (int, float)) else float("-inf")
 
 
+#: Additive PDF location payload fields. Points indexed before they existed lack
+#: them entirely; every reader must treat a missing field as unknown (None).
+PDF_LOCATION_FIELDS = (
+    "page_start", "page_end", "printed_start", "printed_end",
+    "section_path", "section_start_page", "section_start_printed",
+)
+
+
+def has_pdf_location(payload: dict) -> bool:
+    """True for points indexed with the PDF location fields (older points: False)."""
+    return "page_start" in payload
+
+
 def _place_from_hit(hit) -> dict:
     """Build a result object carrying every contract field, `None` where unresolved.
 
     A key is never omitted: an agent doing `result["year"]` gets `None`, not a KeyError.
     """
+    # The fixed 13-field query shape is a contract; the additive PDF location
+    # fields surface through research, source and passage instead.
     payload = hit.payload or {}
     return {
         "doc": payload.get("path") or payload.get("doc"),

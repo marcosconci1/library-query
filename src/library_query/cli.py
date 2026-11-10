@@ -643,7 +643,7 @@ def _run_query(args: argparse.Namespace, result: dict) -> int:
                 if suffix == ".epub":
                     loc = f" section {place['page']}"
                 elif suffix == ".pdf" or suffix not in {".md", ".txt"}:
-                    loc = f" p.{place['page']}"
+                    loc = f" PDF p.{place['page']}"
             where = f"{title}{meta_info}{loc}"
             score = place.get("score")
             score_info = f"[{score:.3f}]" if isinstance(score, (int, float)) else "[  -  ]"
@@ -684,7 +684,7 @@ def cmd_find(args: argparse.Namespace) -> int:
     for place in places:
         authors = ", ".join(place["authors"]) if isinstance(place["authors"], list) else (place["authors"] or "")
         meta = " | ".join(x for x in (authors, str(place["year"]) if place["year"] else "") if x)
-        loc = f" p.{place['page']}" if place["page"] is not None else ""
+        loc = f" PDF p.{place['page']}" if place["page"] is not None else ""
         print(f"[{place['matches']}x] {place['title'] or place['doc_name']}{f' ({meta})' if meta else ''}{loc}")
         print(f"  {place['text']}")
         print()

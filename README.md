@@ -42,8 +42,9 @@ flowchart LR
 ## How it works
 
 1. **Extract** turns each supported file (`pdf`, `epub`, `md`, `txt`) into
-   chunks with source anchors: 1-based page numbers for PDF, section
-   anchors for EPUB.
+   chunks with source anchors. PDF chunks carry the 1-based PDF page, the
+   page range, the printed page label and the outline section when the PDF
+   has them. EPUB chunks carry section anchors.
 2. **Embed** sends each chunk through an OpenAI-compatible embeddings
    endpoint (default: `openai/text-embedding-3-small` via OpenRouter).
 3. **Store** writes the vectors to a local Qdrant container. Point IDs are

@@ -433,7 +433,12 @@ def _path_safety(db_path: Path) -> str | None:
             pass
         probe = resolved_dir
         home = Path.home().resolve()
+        under_home = home in resolved_dir.parents
         for _ in range(64):
+            # Under home only directories below it can be a project worktree: a
+            # .git at home is a dotfiles repo, and anything above home is stray.
+            if under_home and probe == home:
+                break
             # A .git entry at the home root is a personal dotfiles repo, not a
             # project worktree; caches legitimately live under home (XDG dirs).
             git_entry = probe / ".git"
@@ -441,7 +446,7 @@ def _path_safety(db_path: Path) -> str | None:
             is_repo = git_entry.is_file() or (
                 git_entry.is_dir() and (git_entry / "HEAD").exists()
             )
-            if is_repo and probe != home:
+            if is_repo:
                 return "inside_git_worktree"
             if probe.parent == probe:
                 break
