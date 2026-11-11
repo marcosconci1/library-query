@@ -30,17 +30,17 @@ resolve_script() {
     fi
     case "$source" in
         /*) ;;
-        *) source="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd -P)/${source##*/}" ;;
+        *) source="$(CDPATH='' cd -- "$(dirname -- "$source")" && pwd -P)/${source##*/}" ;;
     esac
     while [ -L "$source" ]; do
-        source_dir=$(CDPATH= cd -- "$(dirname -- "$source")" && pwd -P)
+        source_dir=$(CDPATH='' cd -- "$(dirname -- "$source")" && pwd -P)
         link=$(readlink "$source") || return 1
         case "$link" in
             /*) source=$link ;;
             *) source="$source_dir/$link" ;;
         esac
     done
-    source_dir=$(CDPATH= cd -- "$(dirname -- "$source")" && pwd -P)
+    source_dir=$(CDPATH='' cd -- "$(dirname -- "$source")" && pwd -P)
     printf '%s/%s\n' "$source_dir" "${source##*/}"
 }
 
@@ -71,7 +71,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 script_path="$(resolve_script "${BASH_SOURCE[0]}")"
-repo_dir="$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd)"
+repo_dir="$(CDPATH='' cd -- "$(dirname -- "$script_path")" && pwd)"
 launcher="$repo_dir/library-query.sh"
 target="$bin_dir/library-query"
 install_failed=false
@@ -100,7 +100,7 @@ prerequisites() {
 sync_engine() {
     if [ "$check_only" = true ]; then
         printf '%s\n' '[skip] uv sync --locked (check only)'
-    elif (CDPATH= cd -- "$repo_dir" && uv sync --locked); then
+    elif (CDPATH='' cd -- "$repo_dir" && uv sync --locked); then
         printf '%s\n' '[ok] engine synced'
     else
         printf '%s\n' '[fail] uv sync --locked failed' >&2
@@ -136,6 +136,7 @@ install_command_link() {
         fi
     fi
 
+    # shellcheck disable=SC2016 # the literal $PATH is the text to show
     case ":${PATH:-}:" in
         *":$bin_dir:"*) ;;
         *) printf '[warn] add this line to your shell profile: export PATH="%s:$PATH"\n' "$bin_dir" ;;
