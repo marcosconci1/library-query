@@ -28,6 +28,7 @@ EVENT_KINDS = (
     "query_finished",
     "doctor_snapshot",
     "diagnose_built",
+    "setup_run",
 )
 
 _HEX_ID = re.compile(r"(?<![0-9A-Fa-f])[0-9a-f]{32}(?![0-9A-Fa-f])")

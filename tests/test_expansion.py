@@ -59,6 +59,12 @@ MEASURED_OFFTOPIC = [
     "why is the sky blue",
 ]
 
+# Removed from the live score check on 2026-11-11 because the library gained a
+# database book where this query is now genuinely on-topic (0.5485). It stays
+# in the offline cue tests because those check cue behavior on the text, not
+# corpus scores.
+CORPUS_NOW_ON_TOPIC = {"postgres index performance tuning"}
+
 # Queries that contain a distress *word* in a non-distress sense. Every one of
 # these was measured grounding falsely (0.4763-0.5598) against a clinical
 # psychology textbook corpus
@@ -839,7 +845,9 @@ def test_uncued_live_input_and_common_candidate_scores(question, monkeypatch):
 
 @pytest.mark.live
 @live
-@pytest.mark.parametrize("question", MEASURED_OFFTOPIC)
+@pytest.mark.parametrize(
+    "question", [q for q in MEASURED_OFFTOPIC if q not in CORPUS_NOW_ON_TOPIC]
+)
 def test_off_topic_population_stays_below_threshold(question):
     """Expansion must not lift genuinely off-topic input over T."""
     payload = _query_live(question)

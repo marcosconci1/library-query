@@ -23,7 +23,7 @@ from library_query import cli, errors, exact, research, store
     # Prose must never trigger the exact leg.
     ("how do I stay calm before exams", []),
     ("e.g. the idea of i.e. a trade-off", []),
-    ("Marcos's books and Bob's notes", []),
+    ("A reader's books and Bob's notes", []),
     ("", []),
 ])
 def test_literals(question, expected):
@@ -170,6 +170,17 @@ def test_research_survives_an_exact_leg_failure(monkeypatch):
 # --- find command -------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(("place", "expected"), [
+    ({"doc_name": "book.epub", "page": 234}, " section 234"),
+    ({"doc_name": "paper.pdf", "page": 234}, " PDF p.234"),
+    ({"doc_name": "notes.md", "page": 234}, ""),
+    ({"doc_name": "notes.txt", "page": 234}, ""),
+    ({"doc_name": "book.epub", "page": None}, ""),
+])
+def test_location_label(place, expected):
+    assert cli._location_label(place) == expected
+
+
 def test_find_reports_verbatim_places(monkeypatch, capsys):
     client = fake_client([point(1, "py", 4, "if __name__ == '__main__': go()", doc_name="py.pdf",
                                 title="Py Book", authors=["A. Writer"], year=2020, page=12, scope="catalogued")])
@@ -179,6 +190,22 @@ def test_find_reports_verbatim_places(monkeypatch, capsys):
     assert out["literals"] == ["__main__"]
     assert out["places"][0]["page"] == 12 and out["places"][0]["matches"] == 1
     assert "__main__" in out["places"][0]["text"]
+
+
+def test_find_human_output_labels_epub_and_pdf(monkeypatch, capsys):
+    client = fake_client([
+        point(1, "epub", 0, "__main__ in an EPUB", doc_name="book.epub",
+              title="EPUB Book", page=234),
+        point(2, "pdf", 0, "__main__ in a PDF", doc_name="paper.pdf",
+              title="PDF Paper", page=234),
+    ])
+    monkeypatch.setattr(store, "qdrant", lambda: client)
+
+    assert cli.main(["find", "__main__"]) == 0
+    out = capsys.readouterr().out
+    assert "EPUB Book section 234" in out
+    assert "EPUB Book PDF p." not in out
+    assert "PDF Paper PDF p.234" in out
 
 
 def test_find_says_so_when_nothing_matches(monkeypatch, capsys):

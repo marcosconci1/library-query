@@ -3,7 +3,77 @@
 library-query needs three things: a Python 3.11+ environment, a Qdrant
 container, and an embeddings endpoint. Setup takes about five minutes.
 
-## 1. Clone and sync
+## One-command install
+
+Run these commands from a terminal:
+
+```bash
+git clone https://github.com/marcosconci1/library-query
+cd library-query
+./install.sh
+```
+
+The installer checks for `uv`, Docker Compose, and Hermes, then syncs the
+engine and links `library-query` into `~/.local/bin` or the folder you pass
+with `--bin-dir`. It warns when that folder is not on your PATH. Setup creates
+`.env` and starts Qdrant when Docker Compose is available. In a terminal, the
+installer asks for an empty API key with a hidden prompt. It then checks the
+engine and installs the Hermes plugin when Hermes is available.
+
+Options:
+
+- `--check` reports planned installer work. The setup `--check` command changes no configuration and starts nothing; it may append a line to the local diagnostics journal. Setup checks run only when the engine is already installed.
+- `--profile NAME` installs the plugin for a Hermes profile. Repeat it for more profiles.
+- `--no-hermes` skips plugin installation.
+- `--no-docker` skips starting Qdrant.
+- `--library PATH` sets `LIBRARY_ROOT` only when it is empty or still the template value. Otherwise setup prints `library_root: not changed, the env file already sets it`. Relative paths resolve against the folder where you run the command.
+- `--bin-dir DIR` chooses where the `library-query` command link goes.
+- `--help` prints the installer options.
+
+The installer creates a link to the repository launcher. Running it again is
+safe: it syncs the engine, keeps your `.env` values, and reinstalls the plugin
+when Hermes is available.
+It supports Linux and macOS 12.3 or newer, requires `uv`, and works without
+Docker if you start Qdrant yourself.
+
+The installer creates `.env` from `.env.example`. Set `LIBRARY_ROOT` to your
+document folder, or pass `--library <folder>` to the installer or to
+`library-query setup`. Set `OPENROUTER_API_KEY` in `.env`, then run
+`library-query index` to build the first index.
+
+## Hermes plugin
+
+The plugin adds five tools and the `library-consult` skill. The tools search
+the library, browse works, inspect an item, list a document's chunks, and read
+a passage.
+
+When Hermes is installed, `install.sh` installs and enables the plugin from
+this checkout, then runs its doctor check. To install it manually, run:
+
+```bash
+hermes plugins install "file://$(pwd)#integrations/hermes/library-query" --force --enable --yes-deps
+hermes plugins doctor library-query
+hermes plugins enable library-query
+hermes gateway restart
+```
+
+Update it with `hermes plugins update library-query`. Remove it with
+`hermes plugins remove library-query`. Jev filtering is optional. When Jev is
+installed and configured, each returned passage passes a relevance check for
+the question. Without Jev, the plugin returns passages in retrieval order
+without filtering.
+
+The plugin finds the engine through `LIBRARY_QUERY_BIN`, then the plugin setting
+`bin`, then the `library-query.sh` launcher of a full checkout, then `PATH`. If
+the Hermes gateway does not have `~/.local/bin` (or your `--bin-dir`) on its
+`PATH`, set `plugins.entries.library-query.settings.bin` to the full path of the
+launcher.
+
+The plugin and engine versions stay equal. Reinstall the plugin after `git pull`.
+
+## Manual install
+
+### 1. Clone and sync
 
 ```bash
 git clone https://github.com/marcosconci1/library-query
@@ -11,7 +81,7 @@ cd library-query
 uv sync
 ```
 
-## 2. Configure
+### 2. Configure
 
 ```bash
 cp .env.example .env
@@ -33,7 +103,7 @@ server, or a vendor directly. The tool never talks to anything except the
 endpoint you configure and the Qdrant port you point at. For OpenRouter,
 create an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
 
-## 3. Start Qdrant
+### 3. Start Qdrant
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -42,7 +112,7 @@ docker compose -f docker/docker-compose.yml up -d
 The container listens on loopback only, so the vector store is reachable
 from your machine and from nothing else.
 
-## 4. Index and ask
+### 4. Index and ask
 
 ```bash
 uv run library-query index

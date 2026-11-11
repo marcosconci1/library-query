@@ -24,3 +24,24 @@ def test_launcher_does_not_inherit_foreign_python_environment(tmp_path):
     result = subprocess.run(["bash", str(LAUNCHER), "--help"], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert record.read_text().splitlines() == ["PYTHONPATH=unset", "PYTHONHOME=unset"]
+
+
+def test_launcher_resolves_a_symlink_to_the_real_repo(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record = tmp_path / "args.txt"
+    fake_uv = bin_dir / "uv"
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$@\" > '{record}'\n"
+    )
+    fake_uv.chmod(fake_uv.stat().st_mode | stat.S_IEXEC)
+    link_dir = tmp_path / "links"
+    link_dir.mkdir()
+    link = link_dir / "library-query"
+    link.symlink_to(LAUNCHER)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    result = subprocess.run(["bash", str(link), "--help"], env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    args = record.read_text().splitlines()
+    assert args[args.index("--directory") + 1] == str(LAUNCHER.parent)

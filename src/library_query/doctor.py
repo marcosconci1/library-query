@@ -74,6 +74,11 @@ def _check_qdrant() -> list[Check]:
     ]
 
 
+def qdrant_reachable() -> bool:
+    """True when the configured Qdrant answers the doctor's probe."""
+    return _check_qdrant()[0][1]
+
+
 def _check_ledger() -> Check:
     path = config.LEDGER_PATH
     if not path.exists():

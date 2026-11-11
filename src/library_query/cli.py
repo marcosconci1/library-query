@@ -1,12 +1,13 @@
 """library-query CLI: index a document library with 5-way reconciliation, query it for places."""
 import argparse
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import sys
 import time
 
-from . import browse, cache, config, doctor, errors, exact, expansion, extract, inspection, journal, layout_plan, ledger, readiness, research, revisions, store, structure, targets, zotero
+from . import browse, cache, config, doctor, errors, exact, expansion, extract, inspection, journal, layout_plan, ledger, readiness, research, revisions, setup_cmd, store, structure, targets, zotero
 
 #: The query result fields guaranteed by the agent-tool-contract capability. Every
 #: result object carries all of these, using `null` where a value did not resolve.
@@ -545,6 +546,20 @@ def _complete_result(place: dict) -> dict:
     return {field: place.get(field) for field in QUERY_OUTPUT_FIELDS}
 
 
+def _location_label(place: dict) -> str:
+    """Return the human-readable location suffix for a query or exact hit."""
+    page = place.get("page")
+    if page is None:
+        return ""
+    doc_str = place.get("doc_name") or place.get("doc") or ""
+    suffix = Path(doc_str).suffix.lower()
+    if suffix == ".epub":
+        return f" section {page}"
+    if suffix == ".pdf" or suffix not in {".md", ".txt"}:
+        return f" PDF p.{page}"
+    return ""
+
+
 def cmd_query(args: argparse.Namespace) -> int:
     """Run a query and journal its outcome; never the question text or the error message."""
     started = time.monotonic()
@@ -636,14 +651,7 @@ def _run_query(args: argparse.Namespace, result: dict) -> int:
                 meta_items.append(str(place["year"]))
             meta_info = f" ({' | '.join(meta_items)})" if meta_items else ""
             scope_info = f" [{place.get('scope', '')}]" if place.get("scope") else ""
-            loc = ""
-            if place.get("page") is not None:
-                doc_str = place.get("doc_name") or place.get("doc") or ""
-                suffix = Path(doc_str).suffix.lower()
-                if suffix == ".epub":
-                    loc = f" section {place['page']}"
-                elif suffix == ".pdf" or suffix not in {".md", ".txt"}:
-                    loc = f" PDF p.{place['page']}"
+            loc = _location_label(place)
             where = f"{title}{meta_info}{loc}"
             score = place.get("score")
             score_info = f"[{score:.3f}]" if isinstance(score, (int, float)) else "[  -  ]"
@@ -684,7 +692,7 @@ def cmd_find(args: argparse.Namespace) -> int:
     for place in places:
         authors = ", ".join(place["authors"]) if isinstance(place["authors"], list) else (place["authors"] or "")
         meta = " | ".join(x for x in (authors, str(place["year"]) if place["year"] else "") if x)
-        loc = f" PDF p.{place['page']}" if place["page"] is not None else ""
+        loc = _location_label(place)
         print(f"[{place['matches']}x] {place['title'] or place['doc_name']}{f' ({meta})' if meta else ''}{loc}")
         print(f"  {place['text']}")
         print()
@@ -925,6 +933,15 @@ def cmd_describe(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser. Single source of truth for both parsing and `describe`."""
     parser = argparse.ArgumentParser(prog="library-query", description="Semantic locator for a document library")
+    try:
+        package_version = version("library-query")
+    except PackageNotFoundError:
+        package_version = "unknown"
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"library-query {package_version}",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     index_help = "reconcile library files against vector store"
@@ -1058,6 +1075,15 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose_help = "print a redacted diagnostic report for bug reports (no queries, paths, or keys)"
     p_diagnose = sub.add_parser("diagnose", help=diagnose_help, description=diagnose_help)
     p_diagnose.set_defaults(func=cmd_diagnose)
+
+    setup_help = "prepare the env file and Qdrant, then run the doctor (safe to repeat; --check changes nothing)"
+    p_setup = sub.add_parser("setup", help=setup_help, description=setup_help)
+    p_setup.add_argument("--library", metavar="PATH", help="document folder; sets LIBRARY_ROOT only when it is empty or still the template value")
+    p_setup.add_argument("--ask-key", action="store_true", help="prompt (hidden) for OPENROUTER_API_KEY when it is empty and stdin is a terminal")
+    p_setup.add_argument("--no-docker", action="store_true", help="never start Qdrant with docker compose")
+    p_setup.add_argument("--check", action="store_true", help="changes no configuration and starts nothing; it may append a line to the local diagnostics journal")
+    p_setup.add_argument("--json", action="store_true", help="machine-readable output")
+    p_setup.set_defaults(func=setup_cmd.run_setup)
 
     p_inspect = sub.add_parser("inspect", help="offline details for an exact bibliographic item")
     p_inspect.add_argument("--item", required=True)

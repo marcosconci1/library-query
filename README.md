@@ -60,12 +60,19 @@ flowchart LR
 ```bash
 git clone https://github.com/marcosconci1/library-query
 cd library-query
-uv sync
-cp .env.example .env        # point LIBRARY_ROOT at your documents folder
-docker compose -f docker/docker-compose.yml up -d
-uv run library-query index
-uv run library-query query "where does my library talk about X?"
+./install.sh
 ```
+
+The installer syncs the engine, starts Qdrant when Docker Compose is available,
+creates `.env`, and links
+`library-query` into `~/.local/bin` or the folder you pass with `--bin-dir`.
+It warns when that folder is not on your PATH. In a terminal, it asks for an
+empty API key with a hidden prompt. It installs the Hermes plugin when Hermes
+is present. Manual installation steps are in [docs/install.md](docs/install.md).
+
+Before indexing, set `LIBRARY_ROOT` in `.env` to your document folder, or pass
+`--library <folder>` to `./install.sh` or `library-query setup`. Also set
+`OPENROUTER_API_KEY` in `.env` for the embeddings endpoint.
 
 An agent can call the same two commands:
 

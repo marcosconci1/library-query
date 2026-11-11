@@ -2,10 +2,20 @@
 import os
 from pathlib import Path
 
+def repo_root() -> Path:
+    """Checkout root: the directory that holds .env.example and docker/."""
+    return Path(__file__).resolve().parents[2]
+
+
+def env_file_path() -> Path:
+    """The env file in use: LIBRARY_QUERY_ENV_FILE if set, else .env at the repo root."""
+    configured_path = os.environ.get("LIBRARY_QUERY_ENV_FILE")
+    return Path(configured_path) if configured_path else repo_root() / ".env"
+
+
 def load_env() -> None:
     """Populate os.environ from a project .env if present (no hard dep on python-dotenv)."""
-    configured_path = os.environ.get("LIBRARY_QUERY_ENV_FILE")
-    env_path = Path(configured_path) if configured_path else Path(__file__).resolve().parents[2] / ".env"
+    env_path = env_file_path()
     if not env_path.exists():
         return
     for line in env_path.read_text().splitlines():
@@ -13,8 +23,13 @@ def load_env() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
+        value = value.strip()
+        if not value:
+            # A blank template line must not mask the default: os.environ.get(name, default)
+            # returns "" for a set-but-empty name.
+            continue
         if not os.environ.get(key.strip()):
-            os.environ[key.strip()] = value.strip()
+            os.environ[key.strip()] = value
 
 load_env()
 
