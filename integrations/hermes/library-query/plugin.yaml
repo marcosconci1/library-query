@@ -1,5 +1,5 @@
 name: library-query
-version: 0.3.0
+version: 0.4.0
 manifest_version: 1
 description: "Library search tools for Hermes agents: find where an answer lives in your document library (document, page, passage)."
 provides_tools: [library_query, library_browse, library_inspect, library_source, library_passage]

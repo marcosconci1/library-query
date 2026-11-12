@@ -422,6 +422,16 @@ def candidates_from(raw):
     return candidates
 
 
+ITEM_PATTERN = r"item-[0-9a-f]{32}"
+DOCUMENT_PATTERN = r"doc_[0-9a-f]{64}"
+INVALID_INSPECT_GUIDANCE = (
+    "library_inspect accepts only canonical item-<32 hex> item_id values. "
+    "When library_browse returns item_id null "
+    "for an unambiguous work, call library_source(path=...) with its sources path to "
+    "obtain document_id, then call library_query with target.document_ids."
+)
+
+
 def validate_target(target):
     if not isinstance(target, dict) or set(target) - {"item_ids", "document_ids", "roles"}:
         raise ValueError("invalid_target")
@@ -430,7 +440,7 @@ def validate_target(target):
         raise ValueError("invalid_target")
     kind = kinds[0]
     values = target[kind]
-    pattern = r"item-[0-9a-f]{32}" if kind == "item_ids" else r"doc_[0-9a-f]{64}"
+    pattern = ITEM_PATTERN if kind == "item_ids" else DOCUMENT_PATTERN
     if not isinstance(values, list) or not 1 <= len(values) <= 10 or any(
             not isinstance(v, str) or not re.fullmatch(pattern, v) for v in values):
         raise ValueError("invalid_target")
@@ -514,16 +524,19 @@ def handler(scope, command):
             reason = str(exc) if type(exc) is ValueError else ""
             filter_failed = reason in {"filter_unavailable", "filter_not_configured", "filter_missing_credential",
                                         "wrong_profile", "wrong_secret_scope"}
+            invalid_inspect = command == "inspect" and reason == "invalid_inspect_item"
             receipt = {
                 "filtering_status": "filter_unavailable" if filter_failed else "consultation_unavailable",
-                "filtering_reason": (str(exc) if isinstance(exc, RetrievalError) else
+                "filtering_reason": ("invalid_inspect_item" if invalid_inspect else
+                                     str(exc) if isinstance(exc, RetrievalError) else
                                      reason if filter_failed else "retrieval_or_request_unavailable"),
                 "candidate_count": 0, "selected_count": 0, "jev_model": None,
                 "elapsed_ms": round((time.monotonic()-started)*1000)}
             if resolved_budget is not None:
                 receipt.update(weight=research_weight, resolved_budget=dict(resolved_budget))
             return encode({"sources": [], "receipt": receipt,
-                "guidance": "No library evidence obtained. Continue from other context; do not retry automatically."})
+                "guidance": (INVALID_INSPECT_GUIDANCE if invalid_inspect else
+                             "No library evidence obtained. Continue from other context; do not retry automatically.")})
         finally:
             TOOL_DEADLINE.reset(deadline_token)
     return invoke
@@ -539,17 +552,24 @@ TARGET = {"type": "object", "additionalProperties": False, "properties": {
     "document_ids": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 10},
     "roles": {"type": "array", "items": {"type": "string", "enum": ["source", "supplement", "note"]}}}}
 TOOLS = {
-    "library_query": ("research", {"question": STRING, "weight": {"type": "string", "enum": ["light", "meaningful", "important"]}, "target": TARGET}, ["question", "weight"], "Research one focused question; returns the most relevant evidence passages (relevance filtered when the jev plugin is installed). Exact work targets are preserved."),
-    "library_browse": ("browse", {"search": STRING}, [], "Discover title matches in bounded metadata. Resolve ambiguous titles before selecting works; budget_omitted reports hidden matches."),
-    "library_inspect": ("inspect", {"item": STRING}, ["item"], "Inspect one exact work's bounded metadata and attachments."),
-    "library_source": ("source", {"document": STRING, "path": STRING, "offset": integer(0, 2**63-1), "limit": integer(1, 100)}, [], "Discover chunk identities and locations only. Choose exactly one document or path. No excerpt previews."),
+    "library_query": ("research", {"question": STRING, "weight": {"type": "string", "enum": ["light", "meaningful", "important"]}, "target": TARGET}, ["question", "weight"], "Research one focused question; returns the most relevant evidence passages (relevance filtered when the jev plugin is installed). Exact work targets are preserved (target.item_ids, or target.document_ids resolved via library_source(path) when library_browse returns item_id null)."),
+    "library_browse": ("browse", {"search": STRING}, [], "Discover title matches in bounded metadata. Resolve ambiguous titles before selecting works; never silently choose an ambiguous match. When an unambiguous match has item_id null, pass its sources path to library_source(path) and query target.document_ids; budget_omitted reports hidden matches."),
+    "library_inspect": ("inspect", {"item": STRING}, ["item"], "Inspect one exact work's bounded metadata and attachments by canonical item-<32 hex> item_id only. Never pass null, titles, or file paths; when library_browse returns item_id null, call library_source(path) instead."),
+    "library_source": ("source", {"document": STRING, "path": STRING, "offset": integer(0, 2**63-1), "limit": integer(1, 100)}, [], "Discover document_id, chunk identities, and locations only. Choose exactly one document or library-relative path (including sources paths from legacy library_browse items with item_id null). No excerpt previews."),
     "library_passage": ("passage", {"evidence_id": STRING, "question": STRING, "before": integer(0, 5), "after": integer(0, 5), "max_chars": integer(1, 4800)}, ["evidence_id", "question"], "Verify an evidence ID and return the surrounding context for a focused question. Same three-passage/4800-character cap."),
 }
 
 
 def validate_args(command, args):
     _, properties, required, _ = next(v for v in TOOLS.values() if v[0] == command)
-    if not isinstance(args, dict) or set(args) - set(properties) or any(k not in args for k in required):
+    if not isinstance(args, dict) or set(args) - set(properties):
+        raise ValueError("invalid_request")
+    if command == "inspect":
+        item = args.get("item")
+        if not isinstance(item, str) or not re.fullmatch(ITEM_PATTERN, item):
+            raise ValueError("invalid_inspect_item")
+        return
+    if any(k not in args for k in required):
         raise ValueError("invalid_request")
     for key, value in args.items():
         rule = properties[key]

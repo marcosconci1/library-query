@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.4.0 — 2026-11-11
+
+### Changed
+
+- **Compatibility note:** When `library_inspect` receives a non-canonical `item`
+  argument (anything other than `item-<32 hex>`, such as `null`, a title, a file
+  path, or a `doc_<64 hex>` document ID), the Hermes plugin now rejects the input
+  before invoking the CLI and reports `receipt.filtering_reason` as
+  `invalid_inspect_item` (previously `invalid_research_request` for invalid
+  non-empty strings and `retrieval_or_request_unavailable` for missing or
+  non-string values), along with guidance to resolve legacy works via
+  `library_source(path=...)` and `target.document_ids`.
+
+### Fixed
+
+- Guided discovery of legacy and unmapped library books in the Hermes plugin
+  tool schemas (`library_browse`, `library_inspect`, `library_source`,
+  `library_query`) and the `library-consult` skill: when `library_browse`
+  returns `item_id: null` with `sources` paths for an unambiguous work, agents
+  are directed to pass the path from `sources` to `library_source(path=...)` to
+  obtain `document_id` (`doc_<64 hex>`) and query `library_query` with
+  `target.document_ids` instead of calling `library_inspect` or stopping.
+- Clarified guidance for ambiguous titles in the `library_browse` tool description
+  and `library-consult` skill: agents should resolve ambiguity before selecting
+  a work. This is guidance, not an enforced selection guard.
+
+### Upgrade
+
+Run `./install.sh` to sync the engine and reinstall the Hermes plugin, or
+reinstall the plugin manually:
+
+```bash
+hermes plugins install "file://$(pwd)#integrations/hermes/library-query" --force --enable --yes-deps
+```
+
+Then restart the Hermes gateway so the updated plugin and skill are loaded:
+
+```bash
+hermes gateway restart
+```
+
+The plugin and engine versions stay equal (`0.4.0`). Nothing needs reindexing
+for this release because `EXTRACTOR_VERSION` is unchanged (`3`).
+
 ## 0.3.0 — 2026-11-11
 
 ### Added
