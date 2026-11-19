@@ -61,7 +61,7 @@ def test_missing_jev_returns_unfiltered_ranked_evidence_with_caps(monkeypatch):
     data = json.loads(m.handler(scope, "research")({"question": "focused", "weight": "important"}))
     passages = [p for source in data["sources"] for p in source["passages"]]
 
-    assert [p["evidence_id"] for p in passages] == ["e0-0", "e0-1", "e1-0"]
+    assert [p["evidence_id"] for p in passages] == ["e0-0", "e1-0", "e2-0"]
     assert calls[0][0] == "research"
     assert calls[0][1]["max_sources"] == m.FULL_BUDGET["max_sources"]
     assert calls[0][1]["max_passages_per_source"] == m.FULL_BUDGET["max_passages_per_source"]
@@ -101,6 +101,7 @@ def test_registered_configured_jev_still_filters(monkeypatch):
     assert data["receipt"]["filtering_status"] == "filtered"
     assert data["receipt"]["jev_model"] == "jev-latest"
     assert data["receipt"]["selected_count"] == 1
+    assert "diversity_demoted" not in data["receipt"]
 
 
 def test_registered_unconfigured_jev_still_fails_closed(monkeypatch):
@@ -136,3 +137,110 @@ def test_plugin_can_register_without_jev_dependency(monkeypatch):
     assert set(registered) == {"library_query", "library_browse", "library_inspect",
                                "library_source", "library_passage"}
 
+
+def test_registered_configured_jev_rotates_across_sources(monkeypatch):
+    calls = []
+    item_id = "item-" + "1" * 32
+
+    def jev_handler(args):
+        calls.append(args)
+        return {"ok": True, "model": "jev-latest", "answers": {
+            f"p{i}": {"type": "choice", "choice": "directly_useful"}
+            for i in range(4)
+        }}
+
+    def retrieve(*a, **k):
+        raw = raw_candidates(count=2, per_source=2)
+        for source in raw["sources"]:
+            source["item_ids"] = [item_id]
+        return raw
+
+    scope = install_hermes_stubs(monkeypatch, jev_handler)
+    monkeypatch.setattr(m, "call_cli", retrieve)
+
+    # With 3 slots, emission order in coverage rotates e0-0, e1-0, then e0-1
+    three_slot = json.loads(m.handler(scope, "research")({
+        "question": "focused", "weight": "important", "target": {"item_ids": [item_id]},
+    }))
+    assert three_slot["coverage"][0]["returned_evidence_ids"] == ["e0-0", "e1-0", "e0-1"]
+
+    # With 2 slots, rotation gives e0-0 (source 0) and e1-0 (source 1) before source 0's second passage e0-1
+    bundle_orig = m.bundle
+    monkeypatch.setattr(m, "bundle", lambda *a, **k: bundle_orig(*a, **{**k, "budget": {**m.FULL_BUDGET, "max_passages": 2}}))
+
+    data = json.loads(m.handler(scope, "research")({"question": "focused", "weight": "important"}))
+    passages = [p for source in data["sources"] for p in source["passages"]]
+
+    assert [p["evidence_id"] for p in passages] == ["e0-0", "e1-0"]
+    assert len(data["sources"]) == 2
+    assert data["receipt"]["filtering_status"] == "filtered"
+    assert data["receipt"]["selected_count"] == 2
+    assert data["receipt"]["diversity_demoted"] == 1
+    assert data["receipt"]["budget_omitted"] == 1
+
+
+def test_two_sources_each_get_one_slot_before_second_unfiltered(monkeypatch):
+    item_id = "item-" + "1" * 32
+
+    def retrieve(*a, **k):
+        raw = raw_candidates(count=2, per_source=2)
+        for source in raw["sources"]:
+            source["item_ids"] = [item_id]
+        return raw
+
+    scope = install_hermes_stubs(monkeypatch)
+    monkeypatch.setattr(m, "call_cli", retrieve)
+    monkeypatch.setattr(m, "judge", lambda *a: pytest.fail("judge must not run without Jev"))
+
+    three_slot = json.loads(m.handler(scope, "research")({
+        "question": "focused", "weight": "important", "target": {"item_ids": [item_id]},
+    }))
+    assert three_slot["coverage"][0]["returned_evidence_ids"] == ["e0-0", "e1-0", "e0-1"]
+
+    bundle_orig = m.bundle
+    monkeypatch.setattr(m, "bundle", lambda *a, **k: bundle_orig(*a, **{**k, "budget": {**m.FULL_BUDGET, "max_passages": 2}}))
+
+    data = json.loads(m.handler(scope, "research")({"question": "focused", "weight": "important"}))
+    passages = [p for source in data["sources"] for p in source["passages"]]
+
+    assert [p["evidence_id"] for p in passages] == ["e0-0", "e1-0"]
+    assert len(data["sources"]) == 2
+    assert data["receipt"]["filtering_status"] == "unfiltered"
+    assert data["receipt"]["selected_count"] == 2
+    assert data["receipt"]["diversity_demoted"] == 1
+    assert data["receipt"]["budget_omitted"] == 1
+
+
+def test_three_or_more_sources_each_slot_goes_to_different_source_unfiltered(monkeypatch):
+    scope = install_hermes_stubs(monkeypatch)
+    monkeypatch.setattr(m, "call_cli", lambda *a, **k: raw_candidates(count=3, per_source=2))
+    monkeypatch.setattr(m, "judge", lambda *a: pytest.fail("judge must not run without Jev"))
+
+    data = json.loads(m.handler(scope, "research")({"question": "focused", "weight": "important"}))
+    passages = [p for source in data["sources"] for p in source["passages"]]
+
+    assert [p["evidence_id"] for p in passages] == ["e0-0", "e1-0", "e2-0"]
+    assert len(data["sources"]) == 3
+    assert data["receipt"]["selected_count"] == 3
+    assert data["receipt"]["diversity_demoted"] == 1
+    assert data["receipt"]["budget_omitted"] == 2
+
+
+def test_three_or_more_sources_each_slot_goes_to_different_source_filtered(monkeypatch):
+    def jev_handler(args):
+        return {"ok": True, "model": "jev-latest", "answers": {
+            f"p{i}": {"type": "choice", "choice": "directly_useful"}
+            for i in range(6)
+        }}
+
+    scope = install_hermes_stubs(monkeypatch, jev_handler)
+    monkeypatch.setattr(m, "call_cli", lambda *a, **k: raw_candidates(count=3, per_source=2))
+
+    data = json.loads(m.handler(scope, "research")({"question": "focused", "weight": "important"}))
+    passages = [p for source in data["sources"] for p in source["passages"]]
+
+    assert [p["evidence_id"] for p in passages] == ["e0-0", "e1-0", "e2-0"]
+    assert len(data["sources"]) == 3
+    assert data["receipt"]["selected_count"] == 3
+    assert data["receipt"]["diversity_demoted"] == 1
+    assert data["receipt"]["budget_omitted"] == 2

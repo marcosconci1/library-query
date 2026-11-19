@@ -285,6 +285,7 @@ def test_bundle_shape_and_resolved_request(monkeypatch):
     assert passage["passage_hash"] == expected_hash
     assert passage["evidence_id"] == f"doc_a:0:{expected_hash}"
     assert passage["text_truncated"] is False
+    assert passage["full_chars"] == len("Alpha passage about retries.")
     assert passage["page"] == 3
     assert passage["location"] == {"kind": "page", "value": 3}
 
@@ -729,6 +730,8 @@ def test_excerpt_truncation_keeps_full_text_hash(monkeypatch):
     passage = bundle["sources"][0]["passages"][0]
     assert passage["text"] == long_text[:100]
     assert passage["text_truncated"] is True
+    assert passage["full_chars"] == len(long_text) == 3000
+    assert passage["full_chars"] > len(passage["text"])
     assert passage["passage_hash"] == hashlib.sha256(long_text.encode("utf-8")).hexdigest()
 
 
@@ -741,6 +744,8 @@ def test_excerpt_exactly_at_limit_is_not_truncated(monkeypatch):
     passage = bundle["sources"][0]["passages"][0]
     assert passage["text"] == text
     assert passage["text_truncated"] is False
+    assert passage["full_chars"] == len(text) == len(passage["text"])
+    assert "full_chars" in research.response_schema()["sources"]["fields"]["passages"]["fields"]
 
 
 @pytest.mark.parametrize("doc_name,page,expected", [

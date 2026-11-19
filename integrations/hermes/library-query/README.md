@@ -16,7 +16,7 @@ The bundled skill `library-consult` teaches an agent when to consult the library
 
 ## Limits
 
-A response holds at most three excerpts, 4,800 text characters (more when whole passages are shown) and 12,000 serialized characters. Each call has a 30 second subprocess limit and the full tool has a 45 second deadline. Failures return no evidence and a short error category.
+A response holds at most three excerpts, 4,800 text characters (more when whole passages are shown) and 12,000 serialized characters. Each call has a 30 second subprocess limit and the full tool has a 45 second deadline. Failures return no evidence and a short error category. Weight controls the evidence budget: `light` retrieves fewer, shorter passages (3 sources, 1 passage per source, 1,200 excerpt characters), while `meaningful` and `important` use the full budget. Exact targets always use the full budget.
 
 ## Finding the engine
 

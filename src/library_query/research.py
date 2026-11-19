@@ -84,6 +84,7 @@ PASSAGE_OUTPUT_FIELDS = [
     "passage_hash",
     "text",
     "text_truncated",
+    "full_chars",
     "page",
     "location",
     "score",
@@ -851,6 +852,7 @@ def _passage_bundle(record: dict, request: ResearchRequest) -> dict:
         "passage_hash": passage_hash,
         "text": excerpt,
         "text_truncated": len(full_text) > request.max_excerpt_chars,
+        "full_chars": len(full_text),
         "page": payload.get("page"),
         "location": _location_hint(payload),
         "score": record["score"],
@@ -1010,6 +1012,7 @@ def response_schema() -> dict:
                         "passage_hash": {"type": "string", "format": "lowercase sha256 of the full stored UTF-8 passage, before excerpt truncation"},
                         "text": {"type": "string", "semantics": "verbatim prefix of the stored passage, bounded by max_excerpt_chars"},
                         "text_truncated": {"type": "boolean"},
+                        "full_chars": {"type": "integer", "min": 0},
                         "page": {"type": ["integer", "null"]},
                         "location": {
                             "type": "object",

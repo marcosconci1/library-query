@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0 — 2026-11-19
+
+### Changed
+
+- **Behavior change:** Differentiated `library_query` weight budgets. The `light`
+  weight tier now resolves to a lower retrieval budget (3 sources, 1 passage per
+  source, 1,200 max excerpt characters) instead of sharing the full budget.
+  `meaningful` and `important` continue to use the full budget (6 sources, 2 passages
+  per source, 1,600 max excerpt characters). Exact targeted requests continue to
+  resolve the full budget regardless of weight.
+- **Behavior change:** Passage selection in the Hermes plugin now rotates across
+  distinct sources so responses provide connectable references from different works,
+  and reports a `diversity_demoted` receipt counter when rotation displaces passages
+  that pure relevance ranking would have selected.
+- **Additive receipt and passage fields:** The research engine now emits
+  `full_chars` (uncut chunk character length) on each passage and advertises it
+  in the response schema, and the Hermes plugin receipt now includes `omitted`
+  (up to 6 identity-only stubs for approved passages dropped for budget or source
+  diversity, in relevance order), `corpus_matches` (forwarded from the engine's
+  `query_results` `eligible_source_count`), and a deterministic `next_step` hint
+  (`expand` or `target_omitted`).
+
 ## 0.4.0 — 2026-11-11
 
 ### Changed

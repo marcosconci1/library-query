@@ -322,23 +322,65 @@ def test_exact_target_and_fixed_retrieval_budget(monkeypatch, all_selected, tmp_
 
 
 @pytest.mark.parametrize('weight', ['light', 'meaningful', 'important'])
-def test_weight_resolves_explicit_full_fallback_budget(monkeypatch, weight):
+def test_weight_resolves_budget(monkeypatch, weight):
     request, data = research_call(monkeypatch, weight)
     assert request['schema_version'] == 1 and request['scope'] == 'catalogued'
+    expected_budget = m.WEIGHT_BUDGETS[weight]
+    for key in ('max_sources', 'max_passages_per_source', 'max_excerpt_chars'):
+        assert request[key] == expected_budget[key]
+    if weight == 'light':
+        assert request['max_sources'] == 3
+        assert request['max_passages_per_source'] == 1
+        assert request['max_excerpt_chars'] == 1200
+    else:
+        for key in ('max_sources', 'max_passages_per_source', 'max_excerpt_chars'):
+            assert request[key] == m.FULL_BUDGET[key]
+    assert data['receipt']['weight'] == weight
+    assert data['receipt']['resolved_budget'] == expected_budget
+
+
+@pytest.mark.parametrize('weight', ['light', 'meaningful', 'important'])
+def test_exact_target_uses_full_budget_for_all_weights(monkeypatch, weight):
+    target = {'item_ids': ['item-' + '1' * 32], 'roles': ['source']}
+    request, data = research_call(monkeypatch, weight, target)
+    assert request['schema_version'] == 2 and request['target'] == target
     for key in ('max_sources', 'max_passages_per_source', 'max_excerpt_chars'):
         assert request[key] == m.FULL_BUDGET[key]
     assert data['receipt']['weight'] == weight
     assert data['receipt']['resolved_budget'] == m.FULL_BUDGET
 
 
-def test_light_exact_target_uses_full_budget(monkeypatch):
-    target = {'item_ids': ['item-' + '1' * 32], 'roles': ['source']}
-    request, data = research_call(monkeypatch, 'light', target)
-    assert request['schema_version'] == 2 and request['target'] == target
-    for key in ('max_sources', 'max_passages_per_source', 'max_excerpt_chars'):
-        assert request[key] == m.FULL_BUDGET[key]
+def test_handler_light_request_budget_and_receipt(monkeypatch):
+    captured_requests = []
+
+    def fake_cli(command, args=None, request=None):
+        assert command == 'research'
+        captured_requests.append(request)
+        return {'sources': []}
+
+    monkeypatch.setitem(sys.modules, 'hermes_constants', SimpleNamespace(hermes_home_key=lambda: 'scope'))
+    monkeypatch.setattr(m, 'preflight', lambda scope: None)
+    monkeypatch.setattr(m, 'call_cli', fake_cli)
+
+    handler = m.handler('scope', 'research')
+    raw_response = handler({'question': 'how do budgets work?', 'weight': 'light'})
+    data = json.loads(raw_response)
+
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    assert req['max_sources'] == 3
+    assert req['max_passages_per_source'] == 1
+    assert req['max_excerpt_chars'] == 1200
     assert data['receipt']['weight'] == 'light'
-    assert data['receipt']['resolved_budget'] == m.FULL_BUDGET
+    assert data['receipt']['resolved_budget'] == m.WEIGHT_BUDGETS['light']
+    assert data['receipt']['resolved_budget'] == {
+        'max_sources': 3,
+        'max_passages_per_source': 1,
+        'max_excerpt_chars': 1200,
+        'max_passages': m.MAX_PASSAGES,
+        'max_text': m.MAX_TEXT,
+        'max_response': m.MAX_RESPONSE,
+    }
 
 
 @pytest.mark.parametrize('overrides,expected', [({'max_passages': 2}, 2), ({'max_text': 100}, 1)])
@@ -524,3 +566,140 @@ def test_preflight_uses_only_supported_active_configuration(monkeypatch, tmp_pat
         ss.reset_secret_scope(own)
         ss.reset_secret_scope(st)
         hc.reset_hermes_home_override(token)
+
+
+def test_omitted_stubs_content_relevance_order_reasons_and_cap(all_selected):
+    raw = {
+        'sources': [
+            {
+                'source_id': f'doc{i}',
+                'title': f'Book {i}',
+                'authors': [f'Author {i}'],
+                'passages': [
+                    {
+                        'evidence_id': f'e{i}-{j}',
+                        'chunk_index': j,
+                        'text': f'passage-{i}-{j}-' + ('x' * (100 + i * 10 + j)),
+                        'text_truncated': False,
+                        'full_chars': 112 + i * 10 + j,
+                        'location': {'kind': 'page', 'value': i * 10 + j + 1},
+                    }
+                    for j in range(2)
+                ],
+            }
+            for i in range(6)
+        ]
+    }
+    parsed = m.candidates_from(raw)
+    assert len(parsed) == 12
+    assert parsed[0][1]['full_chars'] == 112
+
+    data = json.loads(m.bundle('scope', 'focused question', parsed, time.monotonic()))
+    emitted_ids = [p['evidence_id'] for s in data['sources'] for p in s['passages']]
+    assert emitted_ids == ['e0-0', 'e1-0', 'e2-0']
+    assert data['receipt']['diversity_demoted'] == 1
+    assert data['receipt']['budget_omitted'] == 8
+
+    omitted = data['receipt']['omitted']
+    assert len(omitted) == 6
+    # Relevance order puts doc0's second passage (e0-1) first, before doc3's first passage (e3-0),
+    # even though source rotation visits e3-0 before e0-1 during emission.
+    assert [stub['evidence_id'] for stub in omitted] == ['e0-1', 'e1-1', 'e2-1', 'e3-0', 'e3-1', 'e4-0']
+    assert [stub['reason'] for stub in omitted] == ['diversity', 'budget', 'budget', 'budget', 'budget', 'budget']
+    assert omitted[0] == {
+        'evidence_id': 'e0-1',
+        'title': 'Book 0',
+        'authors': ['Author 0'],
+        'location': {'kind': 'page', 'value': 2},
+        'text_len': len(raw['sources'][0]['passages'][1]['text']),
+        'reason': 'diversity',
+    }
+    for stub in omitted:
+        assert set(stub) == {'evidence_id', 'title', 'authors', 'location', 'text_len', 'reason'}
+        assert 'text' not in stub
+        assert 'passage-' not in json.dumps(stub)
+
+
+def test_corpus_matches_forwarded_from_query_results_and_omitted_when_absent(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'hermes_constants', SimpleNamespace(hermes_home_key=lambda: 'scope'))
+    monkeypatch.setattr(m, 'preflight', lambda scope: False)
+
+    def cli_with_results(command, args=None, request=None):
+        return {
+            'sources': [{
+                'source_id': 'doc0', 'title': 'Title 0', 'authors': ['Author 0'],
+                'passages': [{'evidence_id': 'e0', 'chunk_index': 0, 'text': 'body', 'text_truncated': False,
+                              'full_chars': 4, 'location': {'kind': 'page', 'value': 1}}],
+            }],
+            'query_results': [
+                {'query_index': 0, 'status': 'selected', 'eligible_source_count': 7, 'selected_evidence_ids': ['e0']},
+                {'query_index': 1, 'status': 'selected', 'eligible_source_count': 19, 'selected_evidence_ids': ['e0']},
+            ],
+        }
+
+    monkeypatch.setattr(m, 'call_cli', cli_with_results)
+    data = json.loads(m.handler('scope', 'research')({'question': 'focused question', 'weight': 'meaningful'}))
+    assert data['receipt']['corpus_matches'] == 19
+
+    monkeypatch.setattr(m, 'call_cli', lambda *a, **k: {'sources': []})
+    empty_data = json.loads(m.handler('scope', 'research')({'question': 'focused question', 'weight': 'meaningful'}))
+    assert 'corpus_matches' not in empty_data['receipt']
+
+
+def test_next_step_rule_order_expand_target_omitted_and_absent(all_selected):
+    # 1. "expand" wins even when omitted stubs are also present
+    trunc_candidates = [
+        ({'source_id': f'doc{i}', 'title': f'Title {i}', 'authors': ['A']},
+         {'evidence_id': f'e{i}', 'text': str(i) * 200, 'text_truncated': True, 'full_chars': 900,
+          'location': {'kind': 'page', 'value': i + 1}})
+        for i in range(4)
+    ]
+    expand_data = json.loads(m.bundle('scope', 'q', trunc_candidates, time.monotonic()))
+    assert len(expand_data['receipt']['omitted']) == 1
+    assert expand_data['receipt']['next_step'] == 'expand'
+
+    # 2. "target_omitted" when returned passages are complete and omitted is non-empty
+    complete_with_omitted = [
+        ({'source_id': f'doc{i}', 'title': f'Title {i}', 'authors': ['A']},
+         {'evidence_id': f'e{i}', 'text': f'complete-{i}', 'text_truncated': False, 'full_chars': len(f'complete-{i}'),
+          'location': {'kind': 'page', 'value': i + 1}})
+        for i in range(4)
+    ]
+    omitted_data = json.loads(m.bundle('scope', 'q', complete_with_omitted, time.monotonic()))
+    assert len(omitted_data['receipt']['omitted']) == 1
+    assert omitted_data['receipt']['next_step'] == 'target_omitted'
+
+    # 3. Absent when returned passages are complete and nothing was omitted
+    complete_all_emitted = complete_with_omitted[:2]
+    done_data = json.loads(m.bundle('scope', 'q', complete_all_emitted, time.monotonic()))
+    assert done_data['receipt']['omitted'] == []
+    assert 'next_step' not in done_data['receipt']
+
+
+def test_response_cap_trims_omitted_stubs_before_emitted_passages(all_selected):
+    values = [
+        ({'source_id': f'doc{i}', 'title': f'Long Title {i} ' + ('T' * 60), 'authors': [f'Author {i}']},
+         {'evidence_id': f'e{i}', 'text': f'p{i}-' + ('x' * 100), 'text_truncated': False, 'full_chars': 103,
+          'location': {'kind': 'page', 'value': i + 1}})
+        for i in range(9)
+    ]
+    base_raw = m.bundle('scope', 'focused question', values[:3], time.monotonic())
+    # Give enough room for the 3 emitted passages during the -512 loop guard,
+    # plus only 2 of the 6 omitted stubs after the loop.
+    full_untrimmed = json.loads(m.bundle('scope', 'focused question', values, time.monotonic()))
+    assert len(full_untrimmed['receipt']['omitted']) == 6
+    two_stub_probe = dict(full_untrimmed)
+    two_stub_probe['receipt'] = {**full_untrimmed['receipt'], 'omitted': full_untrimmed['receipt']['omitted'][:2]}
+    cap = max(len(base_raw) + 512, len(m.encode(two_stub_probe)))
+
+    budget = {**m.FULL_BUDGET, 'max_response': cap}
+    raw = m.bundle('scope', 'focused question', values, time.monotonic(), budget=budget)
+    assert len(raw) <= cap
+    data = json.loads(raw)
+    emitted_ids = [p['evidence_id'] for s in data['sources'] for p in s['passages']]
+    assert emitted_ids == ['e0', 'e1', 'e2']
+    assert data['receipt']['selected_count'] == 3
+    assert 0 < len(data['receipt']['omitted']) < 6
+    assert [s['evidence_id'] for s in data['receipt']['omitted']] == [
+        f'e{i}' for i in range(3, 3 + len(data['receipt']['omitted']))
+    ]

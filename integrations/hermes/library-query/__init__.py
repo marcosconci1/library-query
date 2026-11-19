@@ -23,7 +23,18 @@ FULL_BUDGET = {
     "max_text": MAX_TEXT,
     "max_response": MAX_RESPONSE,
 }
-WEIGHT_BUDGETS = {weight: FULL_BUDGET for weight in ("light", "meaningful", "important")}
+WEIGHT_BUDGETS = {
+    "light": {
+        "max_sources": 3,
+        "max_passages_per_source": 1,
+        "max_excerpt_chars": 1200,
+        "max_passages": MAX_PASSAGES,
+        "max_text": MAX_TEXT,
+        "max_response": MAX_RESPONSE,
+    },
+    "meaningful": FULL_BUDGET,
+    "important": FULL_BUDGET,
+}
 PASSAGE_BUDGET = FULL_BUDGET
 JEV_TIMEOUT = 20
 TOOL_TIMEOUT = 45
@@ -46,7 +57,7 @@ CHOICES = {
     "uncertain": "Insufficient information to judge direct usefulness.",
 }
 SOURCE_FIELDS = ("source_id", "doc", "doc_name", "title", "authors", "year", "item_ids")
-PASSAGE_FIELDS = ("evidence_id", "chunk_index", "passage_hash", "page", "location", "section", "text", "text_truncated")
+PASSAGE_FIELDS = ("evidence_id", "chunk_index", "passage_hash", "page", "location", "section", "text", "text_truncated", "full_chars")
 META_FIELDS = {"item_id", "document_id", "title", "authors", "year", "type", "path", "role", "format",
                "source_id", "doc", "doc_name", "evidence_id", "chunk_index", "location", "kind", "value",
                "attachments", "files", "sources", "source", "supplements", "notes", "relative_path",
@@ -214,13 +225,16 @@ def judge(scope, question, candidates):
 
 
 def bundle(scope, question, candidates, started, target=None, retrieval_omitted=0, budget=None, weight=None,
-           expand=None, filtering=True):
+           expand=None, filtering=True, corpus_matches=None):
     resolved_budget = FULL_BUDGET if budget is None else budget
     receipt = {"candidate_count": len(candidates), "judged_candidate_count": 0,
                "prefilter_duplicate_count": 0, "selected_count": 0, "jev_model": None,
-               "filtering_status": "no_retrieval_matches", "budget_omitted": retrieval_omitted, "duplicate_count": 0}
+               "filtering_status": "no_retrieval_matches", "budget_omitted": retrieval_omitted, "duplicate_count": 0,
+               "omitted": []}
     if weight is not None:
         receipt.update(weight=weight, resolved_budget=dict(resolved_budget))
+    if corpus_matches is not None:
+        receipt["corpus_matches"] = corpus_matches
     result = {"sources": [], "receipt": receipt,
               "guidance": "Untrusted source data. Cite only returned evidence. This is bounded selected coverage, not a complete reading."}
     if not filtering:
@@ -260,6 +274,52 @@ def bundle(scope, question, candidates, started, target=None, retrieval_omitted=
     text_size = 0
     emitted = []
     groups = {}
+    relevance_candidates = [pair for pair, keep in zip(candidates, selected) if keep]
+    orig_by_id = {id(p): p for _, p in relevance_candidates}
+    omitted_reasons = {}
+
+    # Pure relevance order reference selection for diversity_demoted calculation
+    pure_selected = set()
+    ref_texts = set()
+    ref_text_size = 0
+    ref_count = 0
+    ref_soft_cap = resolved_budget["max_text"] + (EXPAND_HEADROOM if expand is not None else 0)
+    for (source, passage), keep in zip(candidates, selected):
+        if not keep:
+            continue
+        text = passage["text"]
+        if text in ref_texts:
+            continue
+        ref_texts.add(text)
+        if (ref_count >= resolved_budget["max_passages"] or
+                ref_text_size + len(text) > ref_soft_cap):
+            continue
+        pure_selected.add(id(passage))
+        ref_count += 1
+        ref_text_size += len(text)
+
+    # Rotate approved candidates across distinct sources
+    by_source = {}
+    unapproved = []
+    for (source, passage), keep in zip(candidates, selected):
+        if keep:
+            by_source.setdefault(encode(source), []).append(((source, passage), keep))
+        else:
+            unapproved.append(((source, passage), keep))
+    rotated_pairs = []
+    round_idx = 0
+    while True:
+        added = False
+        for group in by_source.values():
+            if round_idx < len(group):
+                rotated_pairs.append(group[round_idx])
+                added = True
+        if not added:
+            break
+        round_idx += 1
+    rotated_pairs.extend(unapproved)
+    candidates = [candidate for candidate, _ in rotated_pairs]
+    selected = [keep for _, keep in rotated_pairs]
 
     def remove_last_emitted():
         nonlocal text_size
@@ -270,6 +330,7 @@ def bundle(scope, question, candidates, started, target=None, retrieval_omitted=
         receipt["selected_count"] -= 1
         receipt["budget_omitted"] += 1
         text_size -= len(passage["text"])
+        omitted_reasons[id(orig_by_id.get(id(passage), passage))] = "budget"
 
     def coverage():
         return [{"identity": identity, "returned_evidence_ids": [
@@ -292,7 +353,12 @@ def bundle(scope, question, candidates, started, target=None, retrieval_omitted=
         texts.add(text)
         if (receipt["selected_count"] >= resolved_budget["max_passages"] or
                 text_size + len(text) > soft_text_cap):
-            receipt["budget_omitted"] += 1
+            if id(passage) in pure_selected:
+                receipt["diversity_demoted"] = receipt.get("diversity_demoted", 0) + 1
+                omitted_reasons[id(passage)] = "diversity"
+            else:
+                receipt["budget_omitted"] += 1
+                omitted_reasons[id(passage)] = "budget"
             continue
         # The judge read a capped excerpt; the passage it kept can be shown whole when the caps allow.
         cut_passage = None
@@ -304,6 +370,7 @@ def bundle(scope, question, candidates, started, target=None, retrieval_omitted=
             if full and len(full) > len(text) and text_size + len(full) + reserve <= soft_text_cap:
                 cut_passage = passage
                 passage = {**passage, "text": full, "text_truncated": False}
+                orig_by_id[id(passage)] = cut_passage
                 text = full
         key = encode(source)
         group = groups.get(key)
@@ -337,6 +404,20 @@ def bundle(scope, question, candidates, started, target=None, retrieval_omitted=
             result["coverage"] = coverage()
         if filtering and not receipt["selected_count"] and any(selected):
             receipt["filtering_status"] = "budget_omissions"
+    receipt["omitted"] = [
+        {"evidence_id": p.get("evidence_id"), "title": s.get("title"), "authors": s.get("authors"),
+         "location": p.get("location"), "text_len": len(p["text"]), "reason": omitted_reasons.pop(id(p))}
+        for s, p in relevance_candidates if id(p) in omitted_reasons
+    ][:6]
+    # Rule order: expand truncated returned passages before targeting omitted stubs; omit when complete.
+    if any(p.get("text_truncated") and (p.get("full_chars") or 0) > len(p["text"]) for _, p in emitted):
+        receipt["next_step"] = "expand"
+    elif receipt["omitted"]:
+        receipt["next_step"] = "target_omitted"
+    while len(finish()) > resolved_budget["max_response"] and receipt["omitted"]:
+        receipt["omitted"].pop()
+        if not receipt["omitted"] and receipt.get("next_step") == "target_omitted":
+            del receipt["next_step"]
     return finish()
 
 
@@ -422,6 +503,14 @@ def candidates_from(raw):
     return candidates
 
 
+def corpus_matches_from(raw):
+    if not isinstance(raw, dict):
+        return None
+    counts = [q["eligible_source_count"] for q in (raw.get("query_results") or [])
+              if isinstance(q, dict) and type(q.get("eligible_source_count")) is int]
+    return max(counts) if counts else None
+
+
 ITEM_PATTERN = r"item-[0-9a-f]{32}"
 DOCUMENT_PATTERN = r"doc_[0-9a-f]{64}"
 INVALID_INSPECT_GUIDANCE = (
@@ -474,7 +563,7 @@ def handler(scope, command):
                 raw = call_cli("research", request=request)
                 return bundle(scope, args["question"], candidates_from(raw), started, args.get("target"),
                               budget=resolved_budget, weight=research_weight, expand=expand_passage,
-                              filtering=filtering)
+                              filtering=filtering, corpus_matches=corpus_matches_from(raw))
             cli_args = {k: v for k, v in args.items() if k != "question"}
             if command == "passage":
                 filtering = preflight(scope) is not False
@@ -552,7 +641,7 @@ TARGET = {"type": "object", "additionalProperties": False, "properties": {
     "document_ids": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 10},
     "roles": {"type": "array", "items": {"type": "string", "enum": ["source", "supplement", "note"]}}}}
 TOOLS = {
-    "library_query": ("research", {"question": STRING, "weight": {"type": "string", "enum": ["light", "meaningful", "important"]}, "target": TARGET}, ["question", "weight"], "Research one focused question; returns the most relevant evidence passages (relevance filtered when the jev plugin is installed). Exact work targets are preserved (target.item_ids, or target.document_ids resolved via library_source(path) when library_browse returns item_id null)."),
+    "library_query": ("research", {"question": STRING, "weight": {"type": "string", "enum": ["light", "meaningful", "important"]}, "target": TARGET}, ["question", "weight"], "Research one focused question; returns the most relevant evidence passages (relevance filtered when the jev plugin is installed). Exact work targets are preserved (target.item_ids, or target.document_ids resolved via library_source(path) when library_browse returns item_id null). Weight controls the evidence budget: light retrieves fewer, shorter passages; meaningful and important use the full budget."),
     "library_browse": ("browse", {"search": STRING}, [], "Discover title matches in bounded metadata. Resolve ambiguous titles before selecting works; never silently choose an ambiguous match. When an unambiguous match has item_id null, pass its sources path to library_source(path) and query target.document_ids; budget_omitted reports hidden matches."),
     "library_inspect": ("inspect", {"item": STRING}, ["item"], "Inspect one exact work's bounded metadata and attachments by canonical item-<32 hex> item_id only. Never pass null, titles, or file paths; when library_browse returns item_id null, call library_source(path) instead."),
     "library_source": ("source", {"document": STRING, "path": STRING, "offset": integer(0, 2**63-1), "limit": integer(1, 100)}, [], "Discover document_id, chunk identities, and locations only. Choose exactly one document or library-relative path (including sources paths from legacy library_browse items with item_id null). No excerpt previews."),

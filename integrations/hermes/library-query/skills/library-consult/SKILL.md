@@ -32,9 +32,9 @@ routine small tasks. Keep your usual conversational voice.
    identities, and typed locations only. Discovery is metadata, never evidence.
 2. Call `library_query(question, weight, target?)`. Preserve the existing weights:
    light, meaningful, important. They express answer importance, and the receipt
-   reports the resolved budget. `important` and exact targets always use the full
-   budget; `light` and `meaningful` currently retain that fallback until labeled
-   evaluation justifies a lighter tier. Exact targets select `item_ids` or
+   reports the resolved budget. `light` allocates fewer, shorter passages for
+   quick checks; `meaningful` and `important` use the full budget for digging.
+   Exact targets use the full budget and select `item_ids` or
    `document_ids` (including `document_ids` resolved via `library_source(path)` for
    legacy works with `item_id: null`); item targets default to source, with explicit
    source/supplement/note roles. Never approximate a target by title alone.
@@ -48,11 +48,12 @@ routine small tasks. Keep your usual conversational voice.
 3. Read only returned excerpts. The handler retrieves within the resolved budget
    and removes exact same-source duplicates. With Jev installed and configured, it
    judges each remaining passage and returns only directly useful passages.
-   Without Jev, it returns passages in retrieval order and the receipt says
-   `filtering_status: unfiltered`. The ceiling is three excerpts, 4,800 excerpt
+   The same source-rotated order is used with or without Jev (where the receipt says
+   `filtering_status: unfiltered`). The ceiling is three excerpts, 4,800 excerpt
    characters, up to 7,200 when whole passage expansion is active, and 12,000
    serialized response characters, with passages grouped by source. Receipts
    report filtering, retrieved and judged candidates, duplicates and budget omissions.
+   Receipts also list the strongest omitted passages (identity only, no text) plus a `next_step` hint.
    Returned coverage can omit works after filtering; do not claim complete coverage.
    When `receipt.filtering_status` is `unfiltered`, relevance is not judged, so read passages critically and prefer more specific questions.
 4. **Dig deeper when the evidence is incomplete.** One search is a starting point, not the answer. After each result, check for these signs:
