@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 — 2026-11-21
+
+### Fixed
+
+- Qdrant search timeouts now surface as `research_timeout` instead of `qdrant_unreachable`, and the server-side cap no longer exceeds the client deadline.
+
 ## 0.5.0 — 2026-11-19
 
 ### Changed

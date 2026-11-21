@@ -803,6 +803,21 @@ def test_service_waits_are_capped_by_remaining_deadline(monkeypatch):
     assert fake.embed_calls[0]["timeout"] == math.ceil(budget)
 
 
+def test_deadline_service_timeout_floors_fractional_remaining():
+    clock = FakeClock()
+    # remaining 24.2 -> 24
+    deadline = research._Deadline(24.2, clock)
+    assert deadline.service_timeout() == 24
+
+    # remaining 0.4 -> 1
+    deadline = research._Deadline(0.4, clock)
+    assert deadline.service_timeout() == 1
+
+    # remaining 1.0 -> 1
+    deadline = research._Deadline(1.0, clock)
+    assert deadline.service_timeout() == 1
+
+
 def test_exhausted_deadline_raises_research_timeout_before_embedding(monkeypatch):
     fake = FakeRetrieval({})
     fake.install(monkeypatch)
@@ -969,6 +984,51 @@ def test_research_timeout_through_cli_exits_four(cli_env, monkeypatch, capsys, t
     assert code == payload["exit_code"] == 4
     assert payload["error"] == "research_timeout"
     assert capsys.readouterr().out == ""
+
+
+def test_research_qdrant_408_search_timeout_exits_four_with_research_timeout(cli_env, monkeypatch, capsys, tmp_path):
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    fake = FakeRetrieval({})
+    fake.install(monkeypatch)
+
+    def search_timeout(vector, **kwargs):
+        raise store._wrap_qdrant_error(
+            UnexpectedResponse(status_code=408, reason_phrase="Request Timeout", content=b"", headers={})
+        )
+
+    monkeypatch.setattr(store, "query_points_grouped", search_timeout)
+    request_file = tmp_path / "request.json"
+    request_file.write_text(json.dumps({"queries": [{"text": "q0"}]}))
+    code = run_cli(["research", "--input", str(request_file), "--json"])
+    payload = read_error(capsys)
+    assert code == payload["exit_code"] == 4
+    assert payload["error"] == "research_timeout"
+    assert "search exceeded the deadline" in payload["message"]
+    assert "reachable" in payload["message"]
+
+
+def test_research_qdrant_read_timeout_exits_four_with_research_timeout(cli_env, monkeypatch, capsys, tmp_path):
+    import httpx
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    fake = FakeRetrieval({})
+    fake.install(monkeypatch)
+
+    def search_timeout(vector, **kwargs):
+        raise store._wrap_qdrant_error(
+            ResponseHandlingException(httpx.ReadTimeout("timed out reading response"))
+        )
+
+    monkeypatch.setattr(store, "query_points_grouped", search_timeout)
+    request_file = tmp_path / "request.json"
+    request_file.write_text(json.dumps({"queries": [{"text": "q0"}]}))
+    code = run_cli(["research", "--input", str(request_file), "--json"])
+    payload = read_error(capsys)
+    assert code == payload["exit_code"] == 4
+    assert payload["error"] == "research_timeout"
+    assert "search exceeded the deadline" in payload["message"]
+    assert "reachable" in payload["message"]
 
 
 def test_research_never_mutates_the_store(cli_env, monkeypatch, capsys, tmp_path):

@@ -348,8 +348,10 @@ class _Deadline:
         return self._budget - (self._clock() - self._start)
 
     def service_timeout(self) -> int:
-        # Qdrant's per-call timeout is whole seconds; never promise 0.
-        return max(1, math.ceil(self.remaining()))
+        # Qdrant's per-call timeout is whole seconds; never promise 0. Floor fractional
+        # remaining time so the server-side cap provides headroom strictly below the
+        # client socket deadline rather than matching or exceeding it.
+        return max(1, int(self.remaining()))
 
     def check(self) -> None:
         if not math.isfinite(self._budget) or self._budget <= 0:

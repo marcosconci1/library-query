@@ -226,13 +226,81 @@ def _is_qdrant_exception(exc: BaseException) -> bool:
 
 
 def _walk_causes(exc: BaseException):
-    """Yield the exception and its `__cause__`/`__context__` chain, innermost last."""
+    """Yield the exception and its `__cause__`/`__context__`/`source` chain, innermost last."""
     seen = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
         seen.add(id(current))
         yield current
-        current = current.__cause__ or current.__context__
+        for cand in (
+            getattr(current, "source", None),
+            current.__context__,
+            current.__cause__,
+        ):
+            if isinstance(cand, BaseException) and id(cand) not in seen:
+                stack.append(cand)
+
+
+def _is_connect_failure(exc: BaseException) -> bool:
+    """Decide whether an exception is a connect failure (genuine unreachability)."""
+    for klass in type(exc).__mro__:
+        if getattr(klass, "__name__", "") in ("ConnectError", "ConnectTimeout"):
+            return True
+    try:
+        import httpx
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _is_client_timeout(exc: BaseException) -> bool:
+    """Decide whether an exception is a client-side timeout (e.g. ReadTimeout)."""
+    for klass in type(exc).__mro__:
+        name = getattr(klass, "__name__", "")
+        if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
+            return True
+        if name == "TimeoutException" and not _is_connect_failure(exc):
+            return True
+    try:
+        import httpx
+        if isinstance(exc, (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout)):
+            return True
+        if isinstance(exc, httpx.TimeoutException) and not _is_connect_failure(exc):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def is_qdrant_timeout(exc: BaseException) -> bool:
+    """Decide whether an exception represents a Qdrant search timeout rather than unreachability.
+
+    Genuine connect failures (ConnectError, ConnectTimeout) mean Qdrant is unreachable and
+    must stay qdrant_unreachable. Server-side timeouts (408 UnexpectedResponse) and client-side
+    read timeouts (e.g. ReadTimeout / TimeoutException in ResponseHandlingException) indicate
+    Qdrant is reachable but the search exceeded the deadline.
+    """
+    causes = list(_walk_causes(exc))
+
+    # 1. Any connect failure in the chain means genuine unreachability.
+    if any(_is_connect_failure(c) for c in causes):
+        return False
+
+    # 2. Server-side search timeout: 408 Request Timeout.
+    for c in causes:
+        if getattr(c, "status_code", None) == 408:
+            return True
+
+    # 3. Client-side read timeout (e.g. ReadTimeout inside ResponseHandlingException).
+    if any(_is_client_timeout(c) for c in causes):
+        return True
+
+    return False
 
 
 def classify(exc: BaseException) -> tuple[str, str, int]:
@@ -249,6 +317,12 @@ def classify(exc: BaseException) -> tuple[str, str, int]:
     # Qdrant transport failures, including those raised through the client's wrappers.
     for current in _walk_causes(exc):
         if _is_qdrant_exception(current):
+            if is_qdrant_timeout(exc):
+                return (
+                    "research_timeout",
+                    f"Qdrant search exceeded the deadline; Qdrant is reachable: {current}",
+                    EXIT_SERVICE_ERROR,
+                )
             return (
                 "qdrant_unreachable",
                 f"Could not reach Qdrant: {current}",

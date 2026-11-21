@@ -526,9 +526,7 @@ def query_places(
                 # The embedding call above already raised its own classified error, so any
                 # failure surfacing here is the Qdrant transport — including bare `httpx`
                 # errors the client lets through, which would otherwise be misattributed.
-                raise errors.QdrantUnreachableError(
-                    f"Could not reach Qdrant at {config.QDRANT_URL}: {exc}"
-                ) from exc
+                raise _wrap_qdrant_error(exc) from exc
             if cache is not None:
                 cache.stage_candidates(
                     probe_text=probe,
@@ -646,7 +644,11 @@ _IDENTITY_PAYLOAD_FIELDS = [GROUPING_FIELD, "chunk_index", "text", "doc"]
 _IDENTITY_FIELDS_NO_TEXT = [GROUPING_FIELD, "chunk_index", "doc"]
 
 
-def _wrap_qdrant_error(exc: Exception) -> errors.QdrantUnreachableError:
+def _wrap_qdrant_error(exc: Exception) -> errors.LibraryQueryError:
+    if errors.is_qdrant_timeout(exc):
+        return errors.ResearchTimeoutError(
+            f"Qdrant search exceeded the deadline at {config.QDRANT_URL}; Qdrant is reachable: {exc}"
+        )
     return errors.QdrantUnreachableError(f"Could not reach Qdrant at {config.QDRANT_URL}: {exc}")
 
 

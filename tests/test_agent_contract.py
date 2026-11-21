@@ -70,6 +70,85 @@ def test_qdrant_unreachable_during_query(isolated_env, monkeypatch, capsys):
     assert "qdrant" in payload["message"].lower()
 
 
+def test_qdrant_408_unexpected_response_wrap_and_classify():
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    exc_408 = UnexpectedResponse(
+        status_code=408,
+        reason_phrase="Request Timeout",
+        content=b"search timeout",
+        headers={},
+    )
+    wrapped = store._wrap_qdrant_error(exc_408)
+    assert isinstance(wrapped, errors.ResearchTimeoutError)
+    assert wrapped.category == "research_timeout"
+    assert "search exceeded the deadline" in wrapped.message
+    assert "reachable" in wrapped.message
+
+    cat, msg, code = errors.classify(wrapped)
+    assert cat == "research_timeout"
+    assert code == errors.EXIT_SERVICE_ERROR
+    assert "search exceeded the deadline" in msg
+
+    cat_direct, msg_direct, code_direct = errors.classify(exc_408)
+    assert cat_direct == "research_timeout"
+    assert code_direct == errors.EXIT_SERVICE_ERROR
+    assert "search exceeded the deadline" in msg_direct
+    assert "reachable" in msg_direct
+
+
+def test_qdrant_response_handling_read_timeout_wrap_and_classify():
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    read_timeout = httpx.ReadTimeout("timed out reading from socket")
+    exc_rhe = ResponseHandlingException(read_timeout)
+
+    wrapped = store._wrap_qdrant_error(exc_rhe)
+    assert isinstance(wrapped, errors.ResearchTimeoutError)
+    assert wrapped.category == "research_timeout"
+    assert "search exceeded the deadline" in wrapped.message
+    assert "reachable" in wrapped.message
+
+    cat, msg, code = errors.classify(wrapped)
+    assert cat == "research_timeout"
+    assert code == errors.EXIT_SERVICE_ERROR
+
+    cat_direct, msg_direct, code_direct = errors.classify(exc_rhe)
+    assert cat_direct == "research_timeout"
+    assert code_direct == errors.EXIT_SERVICE_ERROR
+    assert "search exceeded the deadline" in msg_direct
+
+
+def test_qdrant_connect_failures_stay_unreachable():
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    conn_err = httpx.ConnectError("connection refused")
+    wrapped_err = store._wrap_qdrant_error(conn_err)
+    assert isinstance(wrapped_err, errors.QdrantUnreachableError)
+    assert wrapped_err.category == "qdrant_unreachable"
+    assert errors.classify(wrapped_err)[0] == "qdrant_unreachable"
+
+    exc_rhe_err = ResponseHandlingException(conn_err)
+    wrapped_rhe_err = store._wrap_qdrant_error(exc_rhe_err)
+    assert isinstance(wrapped_rhe_err, errors.QdrantUnreachableError)
+    assert wrapped_rhe_err.category == "qdrant_unreachable"
+    assert errors.classify(wrapped_rhe_err)[0] == "qdrant_unreachable"
+    assert errors.classify(exc_rhe_err)[0] == "qdrant_unreachable"
+
+    conn_timeout = httpx.ConnectTimeout("connection timed out")
+    wrapped_timeout = store._wrap_qdrant_error(conn_timeout)
+    assert isinstance(wrapped_timeout, errors.QdrantUnreachableError)
+    assert wrapped_timeout.category == "qdrant_unreachable"
+    assert errors.classify(wrapped_timeout)[0] == "qdrant_unreachable"
+
+    exc_rhe_timeout = ResponseHandlingException(conn_timeout)
+    wrapped_rhe_timeout = store._wrap_qdrant_error(exc_rhe_timeout)
+    assert isinstance(wrapped_rhe_timeout, errors.QdrantUnreachableError)
+    assert wrapped_rhe_timeout.category == "qdrant_unreachable"
+    assert errors.classify(wrapped_rhe_timeout)[0] == "qdrant_unreachable"
+    assert errors.classify(exc_rhe_timeout)[0] == "qdrant_unreachable"
+
+
 def test_missing_api_key_during_index(isolated_env, monkeypatch, capsys):
     """Scenario 2: index needing embedding without an API key -> missing_api_key / exit 3."""
     monkeypatch.setattr(config, "OPENROUTER_API_KEY", "")
