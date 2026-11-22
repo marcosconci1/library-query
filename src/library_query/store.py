@@ -18,6 +18,9 @@ from qdrant_client.models import (
     PayloadSchemaType,
     PointIdsList,
     PointStruct,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    ScalarType,
     VectorParams,
 )
 
@@ -135,6 +138,13 @@ def ensure_collection(collection_name: str | None = None) -> None:
             qdrant().create_collection(
                 collection_name=coll,
                 vectors_config=VectorParams(size=config.EMBEDDING_DIM, distance=Distance.COSINE),
+                quantization_config=ScalarQuantization(
+                    scalar=ScalarQuantizationConfig(
+                        type=ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                ),
             )
     except errors.LibraryQueryError:
         raise

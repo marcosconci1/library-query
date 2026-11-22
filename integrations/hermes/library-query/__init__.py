@@ -37,6 +37,8 @@ WEIGHT_BUDGETS = {
 }
 PASSAGE_BUDGET = FULL_BUDGET
 JEV_TIMEOUT = 20
+JEV_MAX_IN_FLIGHT = 4
+_JEV_SLOTS = threading.BoundedSemaphore(JEV_MAX_IN_FLIGHT)
 TOOL_TIMEOUT = 45
 TOOL_DEADLINE = contextvars.ContextVar("library_tool_deadline", default=None)
 RETRIEVAL_ERRORS = {
@@ -194,7 +196,16 @@ def judge(scope, question, candidates):
         timeout = min(timeout, deadline - time.monotonic())
     if timeout <= 0:
         raise ValueError("filter_timeout")
+    judge_deadline = time.monotonic() + timeout
+    slots = _JEV_SLOTS
+    if not slots.acquire(timeout=timeout):
+        raise ValueError("filter_timeout")
+    remaining = judge_deadline - time.monotonic()
+    if remaining <= 0:
+        slots.release()
+        raise ValueError("filter_timeout")
     # A copied context preserves home and secret scopes in the deadline worker.
+    # The worker owns the slot until the handler exits so timeouts cannot leak unbounded threads.
     results = queue.Queue(maxsize=1)
     context = contextvars.copy_context()
     def run():
@@ -202,9 +213,16 @@ def judge(scope, question, candidates):
             results.put((True, context.run(entry.handler, args)))
         except Exception:
             results.put((False, None))
-    threading.Thread(target=run, daemon=True).start()
+        finally:
+            slots.release()
+    worker = threading.Thread(target=run, daemon=True)
     try:
-        ok, raw = results.get(timeout=timeout)
+        worker.start()
+    except Exception:
+        slots.release()
+        raise
+    try:
+        ok, raw = results.get(timeout=remaining)
     except queue.Empty:
         raise ValueError("filter_timeout") from None
     if not ok:

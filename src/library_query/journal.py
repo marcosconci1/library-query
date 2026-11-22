@@ -11,13 +11,20 @@ import json
 import os
 import re
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
+
 from . import config
 
 JOURNAL_NAME = "events.log.jsonl"
+JOURNAL_LOCK_NAME = f".{JOURNAL_NAME}.lock"
 RETENTION_DAYS = 30
 MAX_JOURNAL_BYTES = 1024 * 1024
 TEXT_LIMIT = 1000
@@ -123,6 +130,27 @@ def _trim_file(path: Path, now: datetime | None = None) -> None:
             pass
 
 
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _file_lock(path: Path):
+    """Serialize retention trim/replace and appends across concurrent processes."""
+    if fcntl is None:  # pragma: no cover - non-POSIX fallback
+        yield
+        return
+    fd = os.open(_lock_path(path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def append_event(kind: str, **fields: Any) -> None:
     """Append one scrubbed JSON line. Never raises."""
     try:
@@ -130,7 +158,7 @@ def append_event(kind: str, **fields: Any) -> None:
         line = json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
         path = journal_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with _LOCK:
+        with _LOCK, _file_lock(path):
             if str(path) not in _TRIMMED:
                 _TRIMMED.add(str(path))
                 _trim_file(path)

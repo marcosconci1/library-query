@@ -456,6 +456,54 @@ def test_timeout_no_retry(monkeypatch, tmp_path):
         hc.reset_hermes_home_override(token)
 
 
+def test_timed_out_judge_calls_are_bounded_and_recover_when_workers_exit(monkeypatch, tmp_path):
+    import threading
+
+    release = threading.Event()
+    calls_lock = threading.Lock()
+    calls = []
+
+    def hung_then_fast(args):
+        with calls_lock:
+            idx = len(calls)
+            calls.append(args)
+        if idx < 2:
+            release.wait(timeout=2.0)
+            return {}
+        return json.dumps({
+            'ok': True, 'model': 'actual-model',
+            'answers': {'p0': {'type': 'choice', 'choice': 'directly_useful'}},
+        })
+
+    hc, ss, token, st = install_judge(monkeypatch, tmp_path, hung_then_fast)
+    monkeypatch.setattr(m, '_JEV_SLOTS', threading.BoundedSemaphore(2))
+    monkeypatch.setattr(m, 'JEV_TIMEOUT', 0.05)
+    scope = hc.hermes_home_key()
+    try:
+        # Two consecutive timeouts saturate both slots; hung workers keep holding them.
+        for _ in range(2):
+            with pytest.raises(ValueError, match='filter_timeout'):
+                m.judge(scope, 'q', candidates(1))
+        assert len(calls) == 2
+
+        # A third call while both slots are still held must fail closed without invoking the handler.
+        monkeypatch.setattr(m, 'JEV_TIMEOUT', 0.02)
+        with pytest.raises(ValueError, match='filter_timeout'):
+            m.judge(scope, 'q', candidates(1))
+        assert len(calls) == 2
+
+        # Releasing the hung workers returns their slots, allowing normal calls to succeed.
+        release.set()
+        monkeypatch.setattr(m, 'JEV_TIMEOUT', 1.0)
+        model, selected = m.judge(scope, 'q', candidates(1))
+        assert (model, selected) == ('actual-model', [True])
+        assert len(calls) == 3
+    finally:
+        release.set()
+        ss.reset_secret_scope(st)
+        hc.reset_hermes_home_override(token)
+
+
 def test_concurrent_handler_and_credential_isolation(monkeypatch, tmp_path):
     hc = pytest.importorskip("hermes_constants")
     from tools.registry import registry

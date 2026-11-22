@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2 — 2026-11-22
+
+### Fixed
+
+- Diagnostic journal retention and appends now share an inter-process `flock` on a sidecar lock file so concurrent CLI processes cannot erase newly appended events during trim.
+- Timed-out Jev relevance evaluations in the Hermes plugin are now bounded by a fixed in-flight worker slot pool (`JEV_MAX_IN_FLIGHT = 4`) whose slots are released only when the handler exits, preventing unbounded daemon thread accumulation.
+
+### Changed
+
+- New Qdrant collections created by `library-query index` now enable `int8` scalar quantization (`quantile: 0.99`, `always_ram: true`) by default to prevent cold page-cache search timeouts on shared hosts.
+
 ## 0.5.1 — 2026-11-21
 
 ### Fixed

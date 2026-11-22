@@ -219,3 +219,36 @@ def test_default_batch_ceiling_has_margin_below_server_limit(monkeypatch):
     monkeypatch.delenv("LIBRARY_QUERY_QDRANT_MAX_BATCH_BYTES", raising=False)
     importlib.reload(config)
     assert config.QDRANT_MAX_BATCH_BYTES == 16 * 1024 * 1024
+
+
+def test_ensure_collection_enables_ram_pinned_int8_scalar_quantization(monkeypatch):
+    from qdrant_client.models import ScalarQuantization, ScalarType
+
+    client = MagicMock()
+    client.collection_exists.return_value = False
+    monkeypatch.setattr(store, "qdrant", lambda: client)
+    monkeypatch.setattr(store.exact, "ensure_text_index", lambda c, coll: None)
+
+    store.ensure_collection("library-quant-test")
+
+    client.create_collection.assert_called_once()
+    kwargs = client.create_collection.call_args.kwargs
+    assert kwargs["collection_name"] == "library-quant-test"
+    qcfg = kwargs["quantization_config"]
+    assert isinstance(qcfg, ScalarQuantization)
+    assert qcfg.scalar.type == ScalarType.INT8
+    assert qcfg.scalar.quantile == 0.99
+    assert qcfg.scalar.always_ram is True
+
+
+def test_ensure_collection_skips_create_when_already_present(monkeypatch):
+    client = MagicMock()
+    client.collection_exists.return_value = True
+    monkeypatch.setattr(store, "qdrant", lambda: client)
+    text_index_calls = []
+    monkeypatch.setattr(store.exact, "ensure_text_index", lambda c, coll: text_index_calls.append(coll))
+
+    store.ensure_collection("library")
+
+    client.create_collection.assert_not_called()
+    assert text_index_calls == ["library"]

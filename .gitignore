@@ -9,3 +9,7 @@ __pycache__/
 
 # Tool caches
 retrieval-cache.sqlite3
+
+# Local analysis and workspace artifacts
+.feedback/
+graphify-out/

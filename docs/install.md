@@ -112,6 +112,19 @@ docker compose -f docker/docker-compose.yml up -d
 The container listens on loopback only, so the vector store is reachable
 from your machine and from nothing else.
 
+New collections created by `library-query index` enable Qdrant `int8` scalar
+quantization (`quantile: 0.99`, `always_ram: true`) so quantized vectors stay
+in RAM while full float32 vectors stay on disk for rescoring. This avoids cold
+page-cache search timeouts on shared or memory-constrained hosts without
+re-embedding. If you created your collection on an older version, you can enable
+the same setting in place:
+
+```bash
+curl -X PATCH "http://127.0.0.1:6333/collections/library" \
+  -H "Content-Type: application/json" \
+  -d '{"quantization_config":{"scalar":{"type":"int8","quantile":0.99,"always_ram":true}}}'
+```
+
 ### 4. Index and ask
 
 ```bash

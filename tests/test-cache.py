@@ -821,9 +821,11 @@ def test_off_mode_never_touches_cache_storage(cache_env, monkeypatch, capsys):
     assert diag["index"] is None
     assert diag["bypass_reasons"] == []
     assert not cache_env.cache_dir.exists()
-    # The diagnostic journal is not cache or revision state: it is the one
-    # allowed resident of the state directory in off mode.
-    assert [p.name for p in cache_env.state_dir.iterdir()] == [journal.JOURNAL_NAME], \
+    # The diagnostic journal (and its inter-process lock file) is not cache or
+    # revision state: it is the only allowed resident of the state directory in off mode.
+    residents = {p.name for p in cache_env.state_dir.iterdir()}
+    assert journal.JOURNAL_NAME in residents
+    assert residents <= {journal.JOURNAL_NAME, journal.JOURNAL_LOCK_NAME}, \
         "off mode publishes no revision or cache state"
 
 

@@ -150,3 +150,61 @@ def test_diagnose_bundle_leaks_nothing(state, monkeypatch, tmp_path):
     assert "library-query diagnose bundle" in bundle
     assert "python:" in bundle and "platform:" in bundle and "tool version:" in bundle
     assert "journal tail" in bundle
+
+
+def test_append_waits_for_interprocess_lock_file(state):
+    import fcntl
+    import threading
+    import time
+
+    state.mkdir()
+    path = state / journal.JOURNAL_NAME
+    lock_file = journal._lock_path(path)
+    fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    done = threading.Event()
+
+    def writer():
+        journal.append_event("query_finished", outcome="ok")
+        done.set()
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    try:
+        assert not done.wait(timeout=0.1)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert done.wait(timeout=2.0)
+    thread.join(timeout=2.0)
+    entries = _entries(state)
+    assert len(entries) == 1
+    assert entries[0]["kind"] == "query_finished"
+
+
+def test_concurrent_processes_trim_and_append_without_losing_events(state):
+    import subprocess
+    import sys
+
+    state.mkdir()
+    path = state / journal.JOURNAL_NAME
+    stale = _line(datetime.now(timezone.utc) - timedelta(days=60), marker="stale")
+    path.write_text(stale + "\n", encoding="utf-8")
+
+    worker_count = 12
+    code = (
+        "import sys; from pathlib import Path; "
+        "from library_query import config, journal; "
+        "config.STATE_DIR = Path(sys.argv[1]); "
+        "journal.append_event('query_finished', worker=int(sys.argv[2]))"
+    )
+    procs = [
+        subprocess.Popen([sys.executable, "-c", code, str(state), str(i)])
+        for i in range(worker_count)
+    ]
+    for proc in procs:
+        assert proc.wait(timeout=10) == 0
+
+    entries = _entries(state)
+    assert all(e.get("marker") != "stale" for e in entries)
+    assert sorted(e["worker"] for e in entries) == list(range(worker_count))
