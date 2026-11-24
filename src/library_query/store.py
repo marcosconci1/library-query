@@ -569,14 +569,15 @@ def query_places(
 def retrieve_chunks(document_id, indexes, collection_name=None, timeout=None):
     """Read only the bounded deterministic chunk coordinates requested."""
     try:
-        return qdrant().retrieve(collection_name=collection_name or config.COLLECTION,
-                                 ids=[make_point_id(document_id, i) for i in indexes],
-                                 with_payload=True, with_vectors=False,
-                                 **({"timeout": timeout} if timeout is not None else {}))
+        with _validation_client() as client:
+            return client.retrieve(collection_name=collection_name or config.COLLECTION,
+                                   ids=[make_point_id(document_id, i) for i in indexes],
+                                   with_payload=True, with_vectors=False,
+                                   **({"timeout": timeout} if timeout is not None else {}))
     except errors.LibraryQueryError:
         raise
     except Exception as exc:
-        raise errors.QdrantUnreachableError("Could not read indexed passages") from exc
+        raise _wrap_qdrant_error(exc) from exc
 
 
 def _hit_key(hit, index: int):

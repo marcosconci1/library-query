@@ -13,7 +13,7 @@ import httpx
 import pytest
 from conftest import configure_readiness_client
 
-from library_query import cli, config, errors, ledger, store
+from library_query import cli, config, errors, ledger, research, store
 
 
 @pytest.fixture
@@ -117,6 +117,45 @@ def test_qdrant_response_handling_read_timeout_wrap_and_classify():
     assert cat_direct == "research_timeout"
     assert code_direct == errors.EXIT_SERVICE_ERROR
     assert "search exceeded the deadline" in msg_direct
+
+
+@pytest.mark.parametrize("failure", ["http_408", "read_timeout"])
+def test_retrieve_chunks_classifies_qdrant_timeouts(isolated_env, failure):
+    if failure == "http_408":
+        from qdrant_client.http.exceptions import UnexpectedResponse
+        cause = UnexpectedResponse(
+            status_code=408,
+            reason_phrase="Request Timeout",
+            content=b"retrieve timeout",
+            headers={},
+        )
+    else:
+        from qdrant_client.http.exceptions import ResponseHandlingException
+        cause = ResponseHandlingException(httpx.ReadTimeout("timed out reading response"))
+    isolated_env.client.retrieve.side_effect = cause
+
+    with pytest.raises(errors.ResearchTimeoutError) as excinfo:
+        store.retrieve_chunks("doc_x", [0], timeout=1)
+
+    assert excinfo.value.category == "research_timeout"
+    assert excinfo.value.__cause__ is cause
+
+
+def test_retrieve_chunks_uses_deadline_aware_client(monkeypatch):
+    client = MagicMock()
+    client.retrieve.return_value = []
+    constructor = MagicMock(return_value=client)
+    monkeypatch.setattr(store, "QdrantClient", constructor)
+    deadline = research._Deadline(25, lambda: 0)
+    token = store.SERVICE_DEADLINE.set(deadline)
+    try:
+        assert store.retrieve_chunks("doc_x", [0], timeout=4) == []
+    finally:
+        store.SERVICE_DEADLINE.reset(token)
+
+    assert constructor.call_args.kwargs["timeout"] == 25
+    assert constructor.call_args.kwargs["check_compatibility"] is False
+    assert client.retrieve.call_args.kwargs["timeout"] == 4
 
 
 def test_qdrant_connect_failures_stay_unreachable():
