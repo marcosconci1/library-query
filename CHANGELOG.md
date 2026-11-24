@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 — 2026-11-24
+
+### Fixed
+
+- `store.retrieve_chunks` now uses the deadline-aware client and classifies Qdrant 408/read timeouts as `research_timeout` instead of reporting Qdrant as unreachable.
+
 ## 0.5.2 — 2026-11-22
 
 ### Fixed
