@@ -217,6 +217,14 @@ Repeated queries with the same phrasing are served from a local retrieval
 cache (`retrieval-cache.sqlite3` in your cache directory). The cache is
 disposable: delete it at any time and the next query rebuilds it.
 
+## Troubleshooting
+
+If `query` or `research` reports `embedding_payment_required`, OpenRouter
+returned HTTP 402 for the embedding request. Check your OpenRouter credits and
+API key spending limit. Semantic search is unavailable until the request
+succeeds; if the exact-text index is available, use
+`library-query find "exact phrase"` instead.
+
 ## Requirements
 
 - Python 3.11 or newer

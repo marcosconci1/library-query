@@ -28,6 +28,7 @@ ERROR_EXIT_CODES = {
     "research_index_not_ready": EXIT_CONFIG_ERROR,
     "qdrant_unreachable": EXIT_SERVICE_ERROR,
     "embedding_api_error": EXIT_SERVICE_ERROR,
+    "embedding_payment_required": EXIT_SERVICE_ERROR,
     "zotero_unreachable": EXIT_SERVICE_ERROR,
     "zotero_invalid_response": EXIT_SERVICE_ERROR,
     "research_timeout": EXIT_SERVICE_ERROR,
@@ -105,6 +106,16 @@ class QdrantUnreachableError(LibraryQueryError):
 class EmbeddingApiError(LibraryQueryError):
     def __init__(self, message: str):
         super().__init__("embedding_api_error", message)
+
+
+class EmbeddingPaymentRequiredError(LibraryQueryError):
+    def __init__(self):
+        super().__init__(
+            "embedding_payment_required",
+            "Semantic search is unavailable because OpenRouter rejected the embedding request (HTTP 402). "
+            "Check your OpenRouter credits and API key spending limit. If the exact-text index is available, "
+            "try library-query find \"exact phrase\".",
+        )
 
 
 class ZoteroUnreachableError(LibraryQueryError):

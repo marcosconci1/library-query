@@ -280,6 +280,40 @@ def test_cli_errors_preserve_only_known_categories(monkeypatch, stderr, expected
     assert 'private diagnostic' not in str(caught.value)
 
 
+def test_embedding_payment_required_guidance(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'hermes_constants', SimpleNamespace(hermes_home_key=lambda: 'scope'))
+    monkeypatch.setattr(m, 'preflight', lambda scope: None)
+    calls = []
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        return SimpleNamespace(
+            returncode=4,
+            stdout='private-subprocess-stdout',
+            stderr=json.dumps({
+                'error': 'embedding_payment_required',
+                'message': 'private-subprocess-stderr',
+                'exit_code': 4,
+            }),
+        )
+    monkeypatch.setattr(m.subprocess, 'run', run)
+
+    raw = m.handler('scope', 'research')({'question': 'focused question', 'weight': 'important'})
+    data = json.loads(raw)
+
+    assert data['sources'] == []
+    assert data['receipt']['filtering_status'] == 'consultation_unavailable'
+    assert data['receipt']['filtering_reason'] == 'embedding_payment_required'
+    assert data['guidance'] == (
+        'Semantic search is unavailable because OpenRouter rejected the embedding request (HTTP 402). '
+        'Check your OpenRouter credits and API key spending limit. If the exact-text index is available, '
+        'try library-query find "exact phrase". No library evidence obtained. '
+        'Continue from other context; do not retry automatically.'
+    )
+    assert len(calls) == 1
+    assert 'private-subprocess-stdout' not in raw
+    assert 'private-subprocess-stderr' not in raw
+
+
 def test_process_timeout_receipt_is_specific_and_contains_no_output(monkeypatch):
     monkeypatch.setitem(sys.modules, 'hermes_constants', SimpleNamespace(hermes_home_key=lambda: 'scope'))
     monkeypatch.setattr(m, 'preflight', lambda scope: None)
