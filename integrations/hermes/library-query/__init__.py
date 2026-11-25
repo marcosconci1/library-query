@@ -42,10 +42,16 @@ _JEV_SLOTS = threading.BoundedSemaphore(JEV_MAX_IN_FLIGHT)
 TOOL_TIMEOUT = 45
 TOOL_DEADLINE = contextvars.ContextVar("library_tool_deadline", default=None)
 RETRIEVAL_ERRORS = {
-    "research_timeout", "qdrant_unreachable", "embedding_api_error",
+    "research_timeout", "qdrant_unreachable", "embedding_api_error", "embedding_payment_required",
     "research_index_not_ready", "missing_api_key", "invalid_research_request",
     "index_revision_unavailable", "cache_unsafe", "cache_recovery_required",
 }
+EMBEDDING_PAYMENT_GUIDANCE = (
+    "Semantic search is unavailable because OpenRouter rejected the embedding request (HTTP 402). "
+    "Check your OpenRouter credits and API key spending limit. If the exact-text index is available, "
+    "try library-query find \"exact phrase\". No library evidence obtained. "
+    "Continue from other context; do not retry automatically."
+)
 
 
 class RetrievalError(ValueError):
@@ -632,6 +638,7 @@ def handler(scope, command):
             filter_failed = reason in {"filter_unavailable", "filter_not_configured", "filter_missing_credential",
                                         "wrong_profile", "wrong_secret_scope"}
             invalid_inspect = command == "inspect" and reason == "invalid_inspect_item"
+            payment_required = isinstance(exc, RetrievalError) and str(exc) == "embedding_payment_required"
             receipt = {
                 "filtering_status": "filter_unavailable" if filter_failed else "consultation_unavailable",
                 "filtering_reason": ("invalid_inspect_item" if invalid_inspect else
@@ -642,7 +649,8 @@ def handler(scope, command):
             if resolved_budget is not None:
                 receipt.update(weight=research_weight, resolved_budget=dict(resolved_budget))
             return encode({"sources": [], "receipt": receipt,
-                "guidance": (INVALID_INSPECT_GUIDANCE if invalid_inspect else
+                "guidance": (EMBEDDING_PAYMENT_GUIDANCE if payment_required else
+                             INVALID_INSPECT_GUIDANCE if invalid_inspect else
                              "No library evidence obtained. Continue from other context; do not retry automatically.")})
         finally:
             TOOL_DEADLINE.reset(deadline_token)

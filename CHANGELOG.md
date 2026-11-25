@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 — 2026-11-25
+
+### Fixed
+
+- OpenRouter embedding HTTP 402 responses now surface actionable credit guidance in the CLI and Hermes, with exact-text search suggested when available.
+
 ## 0.5.3 — 2026-11-24
 
 ### Fixed

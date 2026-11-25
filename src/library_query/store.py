@@ -1,5 +1,6 @@
 """Embeddings via OpenRouter (openai-compat) and the Qdrant store."""
 from pathlib import Path
+from urllib.parse import urlparse
 import json
 import uuid
 from contextvars import ContextVar
@@ -189,6 +190,8 @@ def embed(texts: list[str], timeout: float | None = None) -> list[list[float]]:
             raise errors.EmbeddingApiError(
                 f"Could not reach the embedding API at {config.EMBEDDING_BASE_URL}: {exc}"
             ) from exc
+        if response.status_code == 402 and urlparse(config.EMBEDDING_BASE_URL).hostname == "openrouter.ai":
+            raise errors.EmbeddingPaymentRequiredError()
         if response.status_code < 200 or response.status_code >= 300:
             raise errors.EmbeddingApiError(
                 f"Embedding API returned HTTP {response.status_code} from {config.EMBEDDING_BASE_URL}"

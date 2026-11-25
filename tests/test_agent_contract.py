@@ -257,8 +257,63 @@ def test_unregistered_extension_in_index_exits_three(isolated_env, monkeypatch, 
     assert ".odt" in payload["message"]
 
 
+def test_openrouter_embedding_payment_required(isolated_env, monkeypatch, capsys):
+    endpoint = "https://private-user:private-password@openrouter.ai/api/v1"
+    monkeypatch.setattr(config, "EMBEDDING_BASE_URL", endpoint)
+    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "private-request-key")
+    monkeypatch.setattr(
+        store.httpx,
+        "post",
+        lambda *a, **kw: httpx.Response(
+            402,
+            text="private-provider-body",
+            headers={"X-Private-Provider": "private-provider-header"},
+            request=httpx.Request("POST", endpoint),
+        ),
+    )
+
+    code = run_cli(["query", "anything", "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+
+    assert code == 4
+    assert payload == {
+        "error": "embedding_payment_required",
+        "message": (
+            "Semantic search is unavailable because OpenRouter rejected the embedding request (HTTP 402). "
+            "Check your OpenRouter credits and API key spending limit. If the exact-text index is available, "
+            "try library-query find \"exact phrase\"."
+        ),
+        "exit_code": 4,
+    }
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
+    for private_value in (
+        "private-user", "private-password", "private-request-key",
+        "private-provider-body", "private-provider-header", endpoint,
+    ):
+        assert private_value not in captured.err
+
+
+def test_non_openrouter_402_stays_generic(isolated_env, monkeypatch, capsys):
+    monkeypatch.setattr(config, "EMBEDDING_BASE_URL", "https://embeddings.example.test/v1")
+    monkeypatch.setattr(
+        store.httpx,
+        "post",
+        lambda *a, **kw: httpx.Response(402, request=httpx.Request("POST", config.EMBEDDING_BASE_URL)),
+    )
+
+    code = run_cli(["query", "anything", "--json"])
+    payload = read_error(capsys)
+
+    assert payload["error"] == "embedding_api_error"
+    assert code == payload["exit_code"] == 4
+    assert "402" in payload["message"]
+
+
 def test_embedding_api_non_2xx_exits_four(isolated_env, monkeypatch, capsys):
     """Scenario 6: a non-2xx from the embedding endpoint -> embedding_api_error / exit 4."""
+    monkeypatch.setattr(config, "EMBEDDING_BASE_URL", "https://openrouter.ai/api/v1")
     monkeypatch.setattr(
         store.httpx,
         "post",
